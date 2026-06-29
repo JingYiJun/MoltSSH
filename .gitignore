@@ -1,0 +1,23 @@
+# Go build output
+/bin/
+/dist/
+*.test
+*.out
+
+# Coverage
+coverage.out
+coverage.html
+
+# Local config and secrets
+*.local
+.env
+.env.*
+!*.example
+moltssh.yaml
+moltssh.*.pem
+
+# Editors and OS files
+.DS_Store
+.idea/
+.vscode/
+*.swp
