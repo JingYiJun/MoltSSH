@@ -1,6 +1,6 @@
 module github.com/jingyijun/moltssh
 
-go 1.22
+go 1.26.5
 
 require github.com/quic-go/quic-go v0.49.1
 

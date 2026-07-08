@@ -52,7 +52,7 @@ ssh -o ProxyCommand='go run ./cmd/moltssh proxy --addr 127.0.0.1:4433' localhost
 
 Requirements:
 
-- Go 1.22+
+- Go 1.26.5+
 
 Run checks:
 
