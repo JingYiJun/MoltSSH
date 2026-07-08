@@ -6,7 +6,7 @@ The first implementation target is Go + QUIC, using `quic-go` for connection IDs
 
 ## Status
 
-MoltSSH is a fresh project skeleton. The CLI shape is in place; the QUIC transport is not implemented yet.
+MoltSSH currently has the M0 local loop MVP: `proxy` opens one QUIC stream to `server`, and `server` bridges it to a TCP target such as `127.0.0.1:22`.
 
 ## Goals
 
@@ -26,9 +26,9 @@ MoltSSH is a fresh project skeleton. The CLI shape is in place; the QUIC transpo
 ## CLI
 
 ```bash
-moltssh proxy  --config moltssh.yaml
+moltssh proxy  --addr 127.0.0.1:4433
 moltssh server --listen :4433 --connect 127.0.0.1:22
-moltssh probe  --config moltssh.yaml
+moltssh probe  --addr 127.0.0.1:4433
 ```
 
 OpenSSH example:
@@ -37,15 +37,15 @@ OpenSSH example:
 Host lab-box
   HostName ignored
   User jingyijun
-  ProxyCommand /usr/local/bin/moltssh proxy --config ~/.ssh/moltssh.yaml
+  ProxyCommand /usr/local/bin/moltssh proxy --addr lab-box.example.com:4433
 ```
 
-Current skeleton commands print parsed options only:
+Local loop example:
 
 ```bash
-go run ./cmd/moltssh proxy --config test.yaml
 go run ./cmd/moltssh server --listen :4433 --connect 127.0.0.1:22
-go run ./cmd/moltssh probe --config test.yaml
+go run ./cmd/moltssh probe --addr 127.0.0.1:4433
+ssh -o ProxyCommand='go run ./cmd/moltssh proxy --addr 127.0.0.1:4433' localhost
 ```
 
 ## Development
@@ -70,7 +70,8 @@ GOCACHE=/tmp/moltssh-go-build go test ./...
 
 ```text
 cmd/moltssh/        CLI entrypoint
-internal/cli/       command parsing skeleton
+internal/cli/       command parsing
+internal/tunnel/    QUIC stream and TCP bridging
 ```
 
 ## License

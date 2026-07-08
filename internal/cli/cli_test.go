@@ -6,12 +6,12 @@ import (
 	"testing"
 )
 
-func TestRunProxy(t *testing.T) {
+func TestRunHelp(t *testing.T) {
 	var out bytes.Buffer
-	if err := Run([]string{"proxy", "--config", "test.yaml"}, nil, &out, &bytes.Buffer{}); err != nil {
+	if err := Run(nil, nil, &out, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); !strings.Contains(got, "proxy config=test.yaml") {
+	if got := out.String(); !strings.Contains(got, "moltssh proxy  --addr") {
 		t.Fatalf("unexpected output: %q", got)
 	}
 }

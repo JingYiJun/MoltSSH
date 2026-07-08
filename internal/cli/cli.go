@@ -1,9 +1,13 @@
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
+	"time"
+
+	"github.com/jingyijun/moltssh/internal/tunnel"
 )
 
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
@@ -15,7 +19,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) error {
 
 	switch args[0] {
 	case "proxy":
-		return runProxy(args[1:], stdout)
+		return runProxy(args[1:], stdin, stdout)
 	case "server":
 		return runServer(args[1:], stdout)
 	case "probe":
@@ -33,20 +37,20 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w, "MoltSSH: SSH ProxyCommand with migratable paths")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  moltssh proxy  --config moltssh.yaml")
+	fmt.Fprintln(w, "  moltssh proxy  --addr 127.0.0.1:4433")
 	fmt.Fprintln(w, "  moltssh server --listen :4433")
-	fmt.Fprintln(w, "  moltssh probe  --config moltssh.yaml")
+	fmt.Fprintln(w, "  moltssh probe  --addr 127.0.0.1:4433")
 }
 
-func runProxy(args []string, stdout io.Writer) error {
+func runProxy(args []string, stdin io.Reader, stdout io.Writer) error {
 	fs := flag.NewFlagSet("proxy", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	config := fs.String("config", "moltssh.yaml", "config file")
+	addr := fs.String("addr", "127.0.0.1:4433", "QUIC server address")
+	insecure := fs.Bool("insecure", true, "skip server certificate verification")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "proxy config=%s\n", *config)
-	return nil
+	return tunnel.Proxy(context.Background(), *addr, *insecure, stdin, stdout)
 }
 
 func runServer(args []string, stdout io.Writer) error {
@@ -57,17 +61,22 @@ func runServer(args []string, stdout io.Writer) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "server listen=%s connect=%s\n", *listen, *connect)
-	return nil
+	return tunnel.Serve(context.Background(), *listen, *connect)
 }
 
 func runProbe(args []string, stdout io.Writer) error {
 	fs := flag.NewFlagSet("probe", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	config := fs.String("config", "moltssh.yaml", "config file")
+	addr := fs.String("addr", "127.0.0.1:4433", "QUIC server address")
+	timeout := fs.Duration("timeout", time.Second, "probe timeout")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	fmt.Fprintf(stdout, "probe config=%s\n", *config)
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	if err := tunnel.Probe(ctx, *addr); err != nil {
+		return err
+	}
+	fmt.Fprintf(stdout, "probe ok addr=%s\n", *addr)
 	return nil
 }
