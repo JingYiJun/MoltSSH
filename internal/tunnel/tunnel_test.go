@@ -20,3 +20,16 @@ func TestReadConnectRejectsBadHeader(t *testing.T) {
 		t.Fatal("expected error")
 	}
 }
+
+func TestReadRequestProbe(t *testing.T) {
+	command, br, err := readRequest(bytes.NewBufferString("PROBE\n\ntrailing"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command != "PROBE" {
+		t.Fatalf("unexpected command: %q", command)
+	}
+	if got, _ := br.ReadString('g'); got != "trailing" {
+		t.Fatalf("lost buffered payload: %q", got)
+	}
+}

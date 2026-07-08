@@ -9,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -60,7 +61,25 @@ func Probe(ctx context.Context, addr string) error {
 	if err != nil {
 		return err
 	}
-	return c.CloseWithError(0, "")
+	defer c.CloseWithError(0, "")
+
+	stream, err := c.OpenStreamSync(ctx)
+	if err != nil {
+		return err
+	}
+	defer stream.Close()
+
+	if _, err := io.WriteString(stream, "PROBE\n\n"); err != nil {
+		return err
+	}
+	line, err := bufio.NewReader(stream).ReadString('\n')
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(line) != "OK" {
+		return fmt.Errorf("bad probe response %q", strings.TrimSpace(line))
+	}
+	return nil
 }
 
 func serveConn(ctx context.Context, conn quic.Connection, connect string) {
@@ -76,8 +95,17 @@ func serveConn(ctx context.Context, conn quic.Connection, connect string) {
 
 func serveStream(stream quic.Stream, connect string) {
 	defer stream.Close()
-	streamReader, err := readConnect(stream)
+	command, streamReader, err := readRequest(stream)
 	if err != nil {
+		stream.CancelRead(1)
+		stream.CancelWrite(1)
+		return
+	}
+	if command == "PROBE" {
+		_, _ = io.WriteString(stream, "OK\n")
+		return
+	}
+	if command != "CONNECT" {
 		stream.CancelRead(1)
 		stream.CancelWrite(1)
 		return
@@ -94,21 +122,33 @@ func serveStream(stream quic.Stream, connect string) {
 }
 
 func readConnect(r io.Reader) (*bufio.Reader, error) {
-	br := bufio.NewReader(r)
-	line, err := br.ReadString('\n')
+	command, br, err := readRequest(r)
 	if err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(line) != "CONNECT" {
+	if command != "CONNECT" {
 		return nil, fmt.Errorf("bad connect header")
+	}
+	return br, nil
+}
+
+func readRequest(r io.Reader) (string, *bufio.Reader, error) {
+	br := bufio.NewReader(r)
+	line, err := br.ReadString('\n')
+	if err != nil {
+		return "", nil, err
+	}
+	command := strings.TrimSpace(line)
+	if command == "" {
+		return "", nil, errors.New("missing request header")
 	}
 	for {
 		line, err = br.ReadString('\n')
 		if err != nil {
-			return nil, err
+			return "", nil, err
 		}
 		if strings.TrimSpace(line) == "" {
-			return br, nil
+			return command, br, nil
 		}
 	}
 }

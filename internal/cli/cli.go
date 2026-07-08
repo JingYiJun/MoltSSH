@@ -38,8 +38,8 @@ func usage(w io.Writer) {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Usage:")
 	fmt.Fprintln(w, "  moltssh proxy  --addr 127.0.0.1:4433")
-	fmt.Fprintln(w, "  moltssh server --listen :4433")
-	fmt.Fprintln(w, "  moltssh probe  --addr 127.0.0.1:4433")
+	fmt.Fprintln(w, "  moltssh server --listen :4433 --connect 127.0.0.1:22")
+	fmt.Fprintln(w, "  moltssh probe  --addr 127.0.0.1:4433 --timeout 1s")
 }
 
 func runProxy(args []string, stdin io.Reader, stdout io.Writer) error {
