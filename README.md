@@ -2,13 +2,13 @@
 
 # MoltSSH
 
+[English](README.md) | [中文](README.zh.md)
+
 [![CI](https://github.com/JingYiJun/MoltSSH/actions/workflows/ci.yml/badge.svg)](https://github.com/JingYiJun/MoltSSH/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/JingYiJun/MoltSSH)](https://github.com/JingYiJun/MoltSSH/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-MoltSSH is an OpenSSH `ProxyCommand` transport that keeps an SSH byte stream
-active while the client moves across direct, local tunnel, or TCP/HTTP relay
-paths.
+MoltSSH is a resumable OpenSSH `ProxyCommand` over WebSocket.
 
 The current MVP uses WebSocket transport. Existing relay tools provide
 reachability; MoltSSH provides session resume, path probing, and path
@@ -116,28 +116,28 @@ GOCACHE=/tmp/moltssh-go-build go test ./...
 Start a MoltSSH server beside the target `sshd`:
 
 ```bash
-moltssh server --config /etc/moltssh/lab.toml
+moltssh server --config /etc/moltssh/example.toml
 ```
 
 Probe configured client paths:
 
 ```bash
-moltssh probe --config ~/.config/moltssh/lab.toml
+moltssh probe --config ~/.config/moltssh/example.toml
 ```
 
 Use MoltSSH as an OpenSSH `ProxyCommand`:
 
 ```sshconfig
-Host lab-box
-  HostName lab-box
-  User jingyijun
-  ProxyCommand moltssh proxy --config ~/.config/moltssh/lab.toml
+Host example-host
+  HostName example-host
+  User example-user
+  ProxyCommand moltssh proxy --config ~/.config/moltssh/example.toml
 ```
 
 Open an SSH session:
 
 ```bash
-ssh lab-box
+ssh example-host
 ```
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
@@ -148,7 +148,7 @@ MoltSSH uses one TOML schema for client and server commands:
 
 ```toml
 schema_version = 1
-name = "lab-box"
+name = "example-host"
 
 [server]
 listen = "127.0.0.1:8080"
