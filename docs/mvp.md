@@ -49,8 +49,8 @@ all enabled client paths and prints their current health and RTT.
 
 The MVP uses one TOML schema for client and server. Client-only fields are
 ignored by `server`; server-only fields are ignored by `proxy` and `probe`.
-The MVP has no config defaults. Missing fields required by the selected command
-fail validation.
+MoltSSH fills stable runtime defaults before validation. Deployment-specific
+addresses and names stay explicit.
 
 ```toml
 schema_version = 1
@@ -58,79 +58,59 @@ name = "lab-box"
 
 [server]
 listen = "127.0.0.1:8080"
-http_path = "/moltssh"
 connect = "127.0.0.1:22"
-
-[resume]
-timeout = "60s"
-buffer_bytes = 33554432
-
-[probe]
-interval = "3s"
-timeout = "2s"
-switch_cooldown = "10s"
-active_failure_threshold = 2
-candidate_success_threshold = 3
-better_rtt_min_delta = "30ms"
-better_rtt_ratio = 0.25
 
 [[paths]]
 name = "direct"
-transport = "ws"
 endpoint = "ws://192.168.1.20:8080/moltssh"
 priority = 100
-enabled = true
 
 [[paths]]
 name = "frp"
-transport = "ws"
 endpoint = "wss://frp.example.com/moltssh"
 priority = 70
-enabled = true
 
 [[paths]]
 name = "vless-local"
-transport = "ws"
 endpoint = "ws://127.0.0.1:24433/moltssh"
 priority = 50
-enabled = true
 ```
 
 Field behavior:
 
-| Field | Required | Rule |
-|---|---:|---|
-| `schema_version` | yes | Must be `1`; unknown versions fail fast. |
-| `name` | yes | Human-readable connection name. It is sent in `hello`, used in logs, and does not affect routing. |
-| `server.listen` | server | Local TCP address the MoltSSH server binds. Reverse proxies, frp, cloudflared, or VLESS can forward to this address. |
-| `server.http_path` | server | Plain WebSocket request path. Server rejects other paths. Client `ws://` and `wss://` endpoints carry their own path in `paths[].endpoint`. |
-| `server.connect` | server | The single server-side TCP target, usually `127.0.0.1:22`. Every accepted MoltSSH session gets one TCP connection to this target. |
-| `resume.timeout` | proxy/server | Maximum time a live session may stay disconnected. Server closes the TCP connection to `server.connect` after this timeout. |
-| `resume.buffer_bytes` | proxy/server | Per-direction in-memory unacknowledged byte buffer limit. When full, MoltSSH stops reading upstream until ACKs free space. |
-| `probe.interval` | proxy/probe | Time between health probes for enabled inactive paths. |
-| `probe.timeout` | proxy/probe | Per-probe deadline. A path that misses this deadline counts as one failed probe. |
-| `probe.switch_cooldown` | proxy | Minimum time between latency-driven path switches. Failure-driven switches ignore this cooldown. |
-| `probe.active_failure_threshold` | proxy | Consecutive failed probes on the active path before failover starts. |
-| `probe.candidate_success_threshold` | proxy | Consecutive successful probes required before an inactive path may become active. |
-| `probe.better_rtt_min_delta` | proxy | Candidate must be at least this many milliseconds faster than the active path before a latency-driven switch. |
-| `probe.better_rtt_ratio` | proxy | Candidate must also be at least this fraction faster than the active path. `0.25` means 25% faster. |
-| `paths[].name` | proxy/probe | Unique path name used in logs, probe output, and active-path decisions. |
-| `paths[].transport` | proxy/probe | Must be `ws` in the MVP. Unknown values fail fast. |
-| `paths[].endpoint` | proxy/probe | Full WebSocket endpoint URL. `ws://` is for trusted direct/local paths; `wss://` is for TLS-terminated relay paths. Other schemes fail fast in the MVP. |
-| `paths[].priority` | proxy/probe | Tie-breaker when healthy paths have effectively equal RTT. Higher wins. |
-| `paths[].enabled` | proxy/probe | Disabled paths are ignored without deleting their config entry. |
+| Field | Applies to | Default | Rule |
+|---|---|---:|---|
+| `schema_version` | all | required | Must be `1`; unknown versions fail fast. |
+| `name` | all | required | Human-readable connection name. It is sent in `hello`, used in logs, and does not affect routing. |
+| `server.listen` | server | required | Local TCP address the MoltSSH server binds. Reverse proxies, frp, cloudflared, or VLESS can forward to this address. |
+| `server.http_path` | server | `"/moltssh"` | Plain WebSocket request path. Server accepts this path. Client `ws://` and `wss://` endpoints carry their own path in `paths[].endpoint`. |
+| `server.connect` | server | required | The single server-side TCP target, usually `127.0.0.1:22`. Every accepted MoltSSH session gets one TCP connection to this target. |
+| `resume.timeout` | proxy/server | `"60s"` | Maximum time a live session may stay disconnected. Server closes the TCP connection to `server.connect` after this timeout. |
+| `resume.buffer_bytes` | proxy/server | `33554432` | Per-direction in-memory unacknowledged byte buffer limit. When full, MoltSSH stops reading upstream until ACKs free space. |
+| `probe.interval` | proxy/probe | `"3s"` | Time between health probes for enabled inactive paths. |
+| `probe.timeout` | proxy/probe | `"2s"` | Per-probe deadline. A path that misses this deadline counts as one failed probe. |
+| `probe.switch_cooldown` | proxy | `"10s"` | Minimum time between latency-driven path switches. Failure-driven switches use the latest probe result immediately. |
+| `probe.active_failure_threshold` | proxy | `2` | Consecutive failed probes on the active path before failover starts. |
+| `probe.candidate_success_threshold` | proxy | `3` | Consecutive successful probes required before an inactive path may become active. |
+| `probe.better_rtt_min_delta` | proxy | `"30ms"` | Candidate must be at least this many milliseconds faster than the active path before a latency-driven switch. |
+| `probe.better_rtt_ratio` | proxy | `0.25` | Candidate must also be at least this fraction faster than the active path. `0.25` means 25% faster. |
+| `paths[].name` | proxy/probe | required | Unique path name used in logs, probe output, and active-path decisions. |
+| `paths[].transport` | proxy/probe | `"ws"` | WebSocket transport for the MVP. Unknown values fail fast. |
+| `paths[].endpoint` | proxy/probe | required | Full WebSocket endpoint URL. `ws://` is for trusted direct/local paths; `wss://` is for TLS-terminated relay paths. Other schemes fail fast in the MVP. |
+| `paths[].priority` | proxy/probe | `0` | Tie-breaker when healthy paths have effectively equal RTT. Higher wins. |
+| `paths[].enabled` | proxy/probe | `true` | Disabled paths stay in config while enabled paths take traffic and probes. |
 
 Duration fields use Go duration strings such as `500ms`, `3s`, or `1m`.
 Unknown TOML keys fail config validation.
 
 Command-specific validation:
 
-- `server` requires `schema_version`, `name`, `[server]`, and `[resume]`.
-  It does not require `[[paths]]`.
-- `proxy` requires `schema_version`, `name`, `[resume]`, `[probe]`, and at
-  least one enabled `[[paths]]` entry.
-- `probe` requires `schema_version`, `name`, `[probe]`, and at least one
-  enabled `[[paths]]` entry.
+- `server` requires `schema_version`, `name`, `server.listen`, and
+  `server.connect`.
+- `proxy` requires `schema_version`, `name`, and at least one enabled
+  `[[paths]]` entry.
+- `probe` requires `schema_version`, `name`, and at least one enabled
+  `[[paths]]` entry.
 
 There is no `session_dir` in the MVP. Live sessions, offsets, epochs, and
 unacknowledged byte buffers are process-memory state only. MoltSSH does not

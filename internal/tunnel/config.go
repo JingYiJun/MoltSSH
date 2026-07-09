@@ -15,6 +15,22 @@ const (
 	CommandProbe  = "probe"
 )
 
+const (
+	defaultServerHTTPPath                 = "/moltssh"
+	defaultResumeTimeout                  = 60 * time.Second
+	defaultResumeBufferBytes              = 32 * 1024 * 1024
+	defaultProbeInterval                  = 3 * time.Second
+	defaultProbeTimeout                   = 2 * time.Second
+	defaultProbeSwitchCooldown            = 10 * time.Second
+	defaultProbeActiveFailureThreshold    = 2
+	defaultProbeCandidateSuccessThreshold = 3
+	defaultProbeBetterRTTMinDelta         = 30 * time.Millisecond
+	defaultProbeBetterRTTRatio            = 0.25
+	defaultPathTransport                  = "ws"
+	defaultPathPriority                   = 0
+	defaultPathEnabled                    = true
+)
+
 type Config struct {
 	SchemaVersion int
 	Name          string
@@ -97,7 +113,7 @@ func ParseConfig(data, command string) (*Config, error) {
 		if cfg.Server.Listen, err = requiredString(raw.server, "listen"); err != nil {
 			return nil, err
 		}
-		if cfg.Server.HTTPPath, err = requiredString(raw.server, "http_path"); err != nil {
+		if cfg.Server.HTTPPath, err = optionalString(raw.server, "http_path", defaultServerHTTPPath); err != nil {
 			return nil, err
 		}
 		if !strings.HasPrefix(cfg.Server.HTTPPath, "/") {
@@ -108,10 +124,10 @@ func ParseConfig(data, command string) (*Config, error) {
 		}
 	}
 	if command == CommandProxy || command == CommandServer {
-		if cfg.Resume.Timeout, err = requiredDuration(raw.resume, "timeout"); err != nil {
+		if cfg.Resume.Timeout, err = optionalDuration(raw.resume, "timeout", defaultResumeTimeout); err != nil {
 			return nil, err
 		}
-		if cfg.Resume.BufferBytes, err = requiredInt(raw.resume, "buffer_bytes"); err != nil {
+		if cfg.Resume.BufferBytes, err = optionalInt(raw.resume, "buffer_bytes", defaultResumeBufferBytes); err != nil {
 			return nil, err
 		}
 		if cfg.Resume.Timeout <= 0 || cfg.Resume.BufferBytes <= 0 {
@@ -119,25 +135,25 @@ func ParseConfig(data, command string) (*Config, error) {
 		}
 	}
 	if command == CommandProxy || command == CommandProbe {
-		if cfg.Probe.Interval, err = requiredDuration(raw.probe, "interval"); err != nil {
+		if cfg.Probe.Interval, err = optionalDuration(raw.probe, "interval", defaultProbeInterval); err != nil {
 			return nil, err
 		}
-		if cfg.Probe.Timeout, err = requiredDuration(raw.probe, "timeout"); err != nil {
+		if cfg.Probe.Timeout, err = optionalDuration(raw.probe, "timeout", defaultProbeTimeout); err != nil {
 			return nil, err
 		}
-		if cfg.Probe.SwitchCooldown, err = requiredDuration(raw.probe, "switch_cooldown"); err != nil {
+		if cfg.Probe.SwitchCooldown, err = optionalDuration(raw.probe, "switch_cooldown", defaultProbeSwitchCooldown); err != nil {
 			return nil, err
 		}
-		if cfg.Probe.ActiveFailureThreshold, err = requiredInt(raw.probe, "active_failure_threshold"); err != nil {
+		if cfg.Probe.ActiveFailureThreshold, err = optionalInt(raw.probe, "active_failure_threshold", defaultProbeActiveFailureThreshold); err != nil {
 			return nil, err
 		}
-		if cfg.Probe.CandidateSuccessThreshold, err = requiredInt(raw.probe, "candidate_success_threshold"); err != nil {
+		if cfg.Probe.CandidateSuccessThreshold, err = optionalInt(raw.probe, "candidate_success_threshold", defaultProbeCandidateSuccessThreshold); err != nil {
 			return nil, err
 		}
-		if cfg.Probe.BetterRTTMinDelta, err = requiredDuration(raw.probe, "better_rtt_min_delta"); err != nil {
+		if cfg.Probe.BetterRTTMinDelta, err = optionalDuration(raw.probe, "better_rtt_min_delta", defaultProbeBetterRTTMinDelta); err != nil {
 			return nil, err
 		}
-		if cfg.Probe.BetterRTTRatio, err = requiredFloat(raw.probe, "better_rtt_ratio"); err != nil {
+		if cfg.Probe.BetterRTTRatio, err = optionalFloat(raw.probe, "better_rtt_ratio", defaultProbeBetterRTTRatio); err != nil {
 			return nil, err
 		}
 		if cfg.Probe.Interval <= 0 || cfg.Probe.Timeout <= 0 || cfg.Probe.SwitchCooldown < 0 ||
@@ -169,7 +185,7 @@ func parsePaths(raw []map[string]any) ([]PathConfig, error) {
 			return nil, fmt.Errorf("duplicate path name %q", p.Name)
 		}
 		seen[p.Name] = true
-		if p.Transport, err = requiredString(item, "transport"); err != nil {
+		if p.Transport, err = optionalString(item, "transport", defaultPathTransport); err != nil {
 			return nil, fmt.Errorf("paths[%d].%w", i, err)
 		}
 		if p.Transport != "ws" {
@@ -182,10 +198,10 @@ func parsePaths(raw []map[string]any) ([]PathConfig, error) {
 		if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
 			return nil, fmt.Errorf("paths[%d].endpoint must be ws:// or wss:// URL", i)
 		}
-		if p.Priority, err = requiredInt(item, "priority"); err != nil {
+		if p.Priority, err = optionalInt(item, "priority", defaultPathPriority); err != nil {
 			return nil, fmt.Errorf("paths[%d].%w", i, err)
 		}
-		if p.Enabled, err = requiredBool(item, "enabled"); err != nil {
+		if p.Enabled, err = optionalBool(item, "enabled", defaultPathEnabled); err != nil {
 			return nil, fmt.Errorf("paths[%d].%w", i, err)
 		}
 		paths = append(paths, p)
@@ -348,6 +364,13 @@ func requiredString(m map[string]any, key string) (string, error) {
 	return s, nil
 }
 
+func optionalString(m map[string]any, key, def string) (string, error) {
+	if _, ok := m[key]; !ok {
+		return def, nil
+	}
+	return requiredString(m, key)
+}
+
 func requiredDuration(m map[string]any, key string) (time.Duration, error) {
 	s, err := requiredString(m, key)
 	if err != nil {
@@ -360,6 +383,13 @@ func requiredDuration(m map[string]any, key string) (time.Duration, error) {
 	return d, nil
 }
 
+func optionalDuration(m map[string]any, key string, def time.Duration) (time.Duration, error) {
+	if _, ok := m[key]; !ok {
+		return def, nil
+	}
+	return requiredDuration(m, key)
+}
+
 func requiredInt(m map[string]any, key string) (int, error) {
 	v, ok := m[key]
 	if !ok {
@@ -370,6 +400,13 @@ func requiredInt(m map[string]any, key string) (int, error) {
 		return 0, fmt.Errorf("%s must be an integer", key)
 	}
 	return n, nil
+}
+
+func optionalInt(m map[string]any, key string, def int) (int, error) {
+	if _, ok := m[key]; !ok {
+		return def, nil
+	}
+	return requiredInt(m, key)
 }
 
 func requiredFloat(m map[string]any, key string) (float64, error) {
@@ -387,6 +424,13 @@ func requiredFloat(m map[string]any, key string) (float64, error) {
 	}
 }
 
+func optionalFloat(m map[string]any, key string, def float64) (float64, error) {
+	if _, ok := m[key]; !ok {
+		return def, nil
+	}
+	return requiredFloat(m, key)
+}
+
 func requiredBool(m map[string]any, key string) (bool, error) {
 	v, ok := m[key]
 	if !ok {
@@ -397,4 +441,11 @@ func requiredBool(m map[string]any, key string) (bool, error) {
 		return false, fmt.Errorf("%s must be a boolean", key)
 	}
 	return b, nil
+}
+
+func optionalBool(m map[string]any, key string, def bool) (bool, error) {
+	if _, ok := m[key]; !ok {
+		return def, nil
+	}
+	return requiredBool(m, key)
 }
