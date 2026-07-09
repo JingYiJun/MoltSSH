@@ -53,7 +53,7 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build release archives
+      - name: Build release binaries
         env:
           REF_NAME: ${{ github.ref_name }}
           REF_TYPE: ${{ github.ref_type }}
@@ -77,7 +77,6 @@ jobs:
           fi
 
           mkdir -p dist
-          date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           targets=(
             linux/amd64
             linux/arm64
@@ -89,34 +88,24 @@ jobs:
           for target in "${targets[@]}"; do
             goos=${target%/*}
             goarch=${target#*/}
-            name="moltssh_${version}_${goos}_${goarch}"
-            bin="dist/$name/moltssh"
+            bin="dist/moltssh_${version}_${goos}_${goarch}"
             if [ "$goos" = "windows" ]; then
               bin="$bin.exe"
             fi
 
-            mkdir -p "dist/$name"
             GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build \
               -trimpath \
               -ldflags="-s -w" \
               -o "$bin" \
               ./cmd/moltssh
-
-            if [ "$goos" = "windows" ]; then
-              (cd dist && zip -qr "$name.zip" "$name")
-            else
-              tar -C dist -czf "dist/$name.tar.gz" "$name"
-            fi
-            rm -rf "dist/$name"
           done
 
-          (cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS)
+          (cd dist && sha256sum moltssh_* > SHA256SUMS)
 
           {
             echo "tag=$tag"
             echo "version=$version"
             echo "prerelease=$prerelease"
-            echo "date_utc=$date_utc"
           } >>"$GITHUB_ENV"
 
       - name: Publish GitHub release
