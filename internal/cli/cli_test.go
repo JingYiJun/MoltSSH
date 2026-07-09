@@ -11,14 +11,14 @@ func TestRunHelp(t *testing.T) {
 	if err := Run(nil, nil, &out, &bytes.Buffer{}); err != nil {
 		t.Fatal(err)
 	}
-	if got := out.String(); !strings.Contains(got, "moltssh proxy  --addr") {
+	if got := out.String(); !strings.Contains(got, "moltssh proxy  --config") {
 		t.Fatalf("unexpected output: %q", got)
 	}
-	if got := out.String(); !strings.Contains(got, "--connect 127.0.0.1:22") {
-		t.Fatalf("missing server connect flag: %q", got)
+	if got := out.String(); !strings.Contains(got, "moltssh server --config") {
+		t.Fatalf("missing server config usage: %q", got)
 	}
-	if got := out.String(); !strings.Contains(got, "--timeout 1s") {
-		t.Fatalf("missing probe timeout flag: %q", got)
+	if got := out.String(); !strings.Contains(got, "moltssh probe  --config") {
+		t.Fatalf("missing probe config usage: %q", got)
 	}
 }
 

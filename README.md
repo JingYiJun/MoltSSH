@@ -1,34 +1,52 @@
 # MoltSSH
 
-MoltSSH is an experimental OpenSSH `ProxyCommand` transport that aims to keep an SSH byte stream alive while the underlying network path moves between LAN direct access and a public relay.
+MoltSSH is an experimental OpenSSH `ProxyCommand` transport that keeps an SSH
+byte stream alive while the active network path moves between direct access and
+TCP/HTTP relay paths.
 
-The first implementation target is Go + QUIC, using `quic-go` for connection IDs, ordered reliable streams, TLS 1.3, congestion control, retransmission, NAT rebinding, and path migration. A TCP/WebSocket resume layer is intentionally deferred until UDP/QUIC is proven insufficient.
+The current MVP is TCP/WebSocket-first. Existing relay tools provide
+reachability; MoltSSH provides session resume, path probing, and path switching.
+UDP/QUIC is optional future work after the WebSocket protocol is proven.
+
+See [docs/mvp.md](docs/mvp.md) for the active implementation plan and
+[ADR 0001](docs/adr/0001-tcp-ws-primary-quic-auxiliary.md) for the transport
+decision.
 
 ## Status
 
-MoltSSH currently has the M0 local loop MVP: `proxy` opens one QUIC stream to `server`, and `server` bridges it to a TCP target such as `127.0.0.1:22`.
+The WebSocket MVP is implemented:
+
+- TOML-only `proxy`, `server`, and `probe` commands.
+- WebSocket subprotocol `moltssh.v1` with framed `hello`, `accept`, `data`,
+  `ack`, `fin`, `ping`, `pong`, `close`, and `error` messages.
+- Server-side TCP bridging that keeps the target connection open across client
+  reconnects until `resume.timeout`.
+- In-memory replay buffers, epochs, offset checks, and probe-driven path
+  selection/switching.
 
 ## Goals
 
 - Work as an OpenSSH `ProxyCommand`.
-- Carry the raw SSH stdin/stdout byte stream over one QUIC bidirectional stream.
-- Prefer LAN UDP paths and fall back to public UDP relay paths.
-- Preserve established SSH sessions across supported QUIC path migration.
+- Carry the raw SSH stdin/stdout byte stream over WebSocket paths.
 - Keep the server side connected to a local `sshd`, usually `127.0.0.1:22`.
+- Preserve established SSH sessions across supported client reconnects and path
+  switches.
 
 ## Non-goals
 
 - It is not a VPN.
 - It is not a general bastion host.
-- It does not reimplement TCP in the MVP.
-- It does not promise survival across client/server process restarts.
+- It does not build a new relay system in the MVP.
+- It does not survive client or server process restarts.
 
 ## CLI
 
+Runtime choices belong in TOML config, not flags:
+
 ```bash
-moltssh proxy  --addr 127.0.0.1:4433
-moltssh server --listen :4433 --connect 127.0.0.1:22
-moltssh probe  --addr 127.0.0.1:4433
+moltssh proxy  --config ~/.config/moltssh/lab.toml
+moltssh server --config /etc/moltssh/lab.toml
+moltssh probe  --config ~/.config/moltssh/lab.toml
 ```
 
 OpenSSH example:
@@ -37,15 +55,7 @@ OpenSSH example:
 Host lab-box
   HostName ignored
   User jingyijun
-  ProxyCommand /usr/local/bin/moltssh proxy --addr lab-box.example.com:4433
-```
-
-Local loop example:
-
-```bash
-go run ./cmd/moltssh server --listen :4433 --connect 127.0.0.1:22
-go run ./cmd/moltssh probe --addr 127.0.0.1:4433
-ssh -o ProxyCommand='go run ./cmd/moltssh proxy --addr 127.0.0.1:4433' localhost
+  ProxyCommand moltssh proxy --config ~/.config/moltssh/lab.toml
 ```
 
 ## Development
@@ -58,9 +68,12 @@ Run checks:
 
 ```bash
 go test ./...
+go test -race ./...
+scripts/docker-ssh-smoke.sh
 ```
 
-If your environment cannot write to the default Go build cache, use a writable cache path:
+If your environment cannot write to the default Go build cache, use a writable
+cache path:
 
 ```bash
 GOCACHE=/tmp/moltssh-go-build go test ./...
@@ -71,7 +84,7 @@ GOCACHE=/tmp/moltssh-go-build go test ./...
 ```text
 cmd/moltssh/        CLI entrypoint
 internal/cli/       command parsing
-internal/tunnel/    QUIC stream and TCP bridging
+internal/tunnel/    WebSocket transport, TCP bridging, probing, and resume
 ```
 
 ## License
