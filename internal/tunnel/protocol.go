@@ -3,6 +3,7 @@ package tunnel
 import (
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"golang.org/x/net/websocket"
@@ -33,6 +34,23 @@ type frameHeader struct {
 	SentAtUnixNano   int64  `json:"sent_at_unix_nano,omitempty"`
 	Code             string `json:"code,omitempty"`
 	Message          string `json:"message,omitempty"`
+}
+
+type frameError struct {
+	err error
+}
+
+func (e frameError) Error() string {
+	return e.err.Error()
+}
+
+func (e frameError) Unwrap() error {
+	return e.err
+}
+
+func isFrameError(err error) bool {
+	var target frameError
+	return errors.As(err, &target)
 }
 
 func writeFrame(ws *websocket.Conn, h frameHeader, payload []byte) error {
@@ -66,30 +84,30 @@ func readFrame(ws *websocket.Conn) (frameHeader, []byte, error) {
 		return frameHeader{}, nil, err
 	}
 	if len(msg) < 8 {
-		return frameHeader{}, nil, fmt.Errorf("truncated frame envelope")
+		return frameHeader{}, nil, frameError{fmt.Errorf("truncated frame envelope")}
 	}
 	headerLen := binary.BigEndian.Uint32(msg[0:4])
 	payloadLen := binary.BigEndian.Uint32(msg[4:8])
 	if headerLen > maxHeaderBytes {
-		return frameHeader{}, nil, fmt.Errorf("frame header too large")
+		return frameHeader{}, nil, frameError{fmt.Errorf("frame header too large")}
 	}
 	if payloadLen > maxPayloadBytes {
-		return frameHeader{}, nil, fmt.Errorf("frame payload too large")
+		return frameHeader{}, nil, frameError{fmt.Errorf("frame payload too large")}
 	}
 	want := 8 + int(headerLen) + int(payloadLen)
 	if len(msg) != want {
-		return frameHeader{}, nil, fmt.Errorf("truncated frame body")
+		return frameHeader{}, nil, frameError{fmt.Errorf("truncated frame body")}
 	}
 	var h frameHeader
 	if err := json.Unmarshal(msg[8:8+headerLen], &h); err != nil {
-		return frameHeader{}, nil, fmt.Errorf("bad frame header: %w", err)
+		return frameHeader{}, nil, frameError{fmt.Errorf("bad frame header: %w", err)}
 	}
 	if h.Type == "" {
-		return frameHeader{}, nil, fmt.Errorf("frame type is required")
+		return frameHeader{}, nil, frameError{fmt.Errorf("frame type is required")}
 	}
 	payload := msg[8+headerLen:]
 	if h.Type != "data" && len(payload) != 0 {
-		return frameHeader{}, nil, fmt.Errorf("%s frame must not carry payload", h.Type)
+		return frameHeader{}, nil, frameError{fmt.Errorf("%s frame must not carry payload", h.Type)}
 	}
 	return h, payload, nil
 }

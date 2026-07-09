@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -76,9 +77,11 @@ func Probe(ctx context.Context, cfg *Config, stdout io.Writer) error {
 	for _, p := range enabledPaths(cfg.Paths) {
 		rtt, err := probePath(ctx, p, cfg.Probe.Timeout)
 		if err != nil {
+			log.Printf("probe path=%s status=fail rtt= error=%s", p.Name, err)
 			fmt.Fprintf(stdout, "path=%s status=fail rtt= endpoint=%s error=%s\n", p.Name, redactEndpoint(p.Endpoint), err)
 			continue
 		}
+		log.Printf("probe path=%s status=ok rtt=%s error=", p.Name, rtt)
 		fmt.Fprintf(stdout, "path=%s status=ok rtt=%s endpoint=%s error=\n", p.Name, rtt, redactEndpoint(p.Endpoint))
 	}
 	return nil
@@ -95,6 +98,9 @@ func (s *wsServer) handle(ws *websocket.Conn) {
 	for {
 		f, _, err := readFrame(ws)
 		if err != nil {
+			if isFrameError(err) {
+				sendError(ws, "protocol_error", err.Error())
+			}
 			return
 		}
 		switch f.Type {
@@ -141,6 +147,7 @@ func (s *wsServer) accept(ws *websocket.Conn, f frameHeader) (*serverSession, *s
 		s.sessions[id] = sess
 		s.mu.Unlock()
 		go sess.readTarget()
+		log.Printf("server accept path=ws session=%s epoch=1", id)
 		if err := conn.send(frameHeader{
 			Type:             "accept",
 			SessionID:        id,
@@ -262,6 +269,7 @@ func (s *serverSession) resume(ws *websocket.Conn, f frameHeader) (*serverConn, 
 	if old != nil {
 		_ = old.ws.Close()
 	}
+	log.Printf("server resume path=ws session=%s epoch=%d", s.id, conn.epoch)
 	if err := conn.send(accept, nil); err != nil {
 		s.disconnect(conn)
 		return nil, err
@@ -280,6 +288,9 @@ func (s *serverSession) run(conn *serverConn) {
 	for {
 		f, payload, err := readFrame(conn.ws)
 		if err != nil {
+			if isFrameError(err) {
+				_ = conn.send(frameHeader{Type: "error", Code: "protocol_error", Message: err.Error()}, nil)
+			}
 			s.disconnect(conn)
 			return
 		}
@@ -439,6 +450,7 @@ func (s *serverSession) disconnect(conn *serverConn) {
 	}
 	s.active = nil
 	s.disconnected = time.Now()
+	epoch := s.epoch
 	if s.disconnectTTL != nil {
 		s.disconnectTTL.Stop()
 	}
@@ -447,6 +459,7 @@ func (s *serverSession) disconnect(conn *serverConn) {
 	})
 	s.cond.Broadcast()
 	s.mu.Unlock()
+	log.Printf("server disconnect path=ws session=%s epoch=%d", s.id, epoch)
 }
 
 func (s *serverSession) closeTerminal(code, message string) {
@@ -461,9 +474,11 @@ func (s *serverSession) closeTerminal(code, message string) {
 	if s.disconnectTTL != nil {
 		s.disconnectTTL.Stop()
 	}
+	epoch := s.epoch
 	s.cond.Broadcast()
 	s.mu.Unlock()
 
+	log.Printf("server close path=ws session=%s epoch=%d code=%s", s.id, epoch, code)
 	if active != nil {
 		_ = active.send(frameHeader{Type: "close", Code: code, Message: message}, nil)
 		_ = active.ws.Close()
@@ -623,6 +638,7 @@ func (rt *clientRuntime) activate(ctx context.Context, path PathConfig, resume b
 	rt.cond.Broadcast()
 	rt.mu.Unlock()
 
+	log.Printf("proxy active path=%s session=%s epoch=%d", path.Name, accept.SessionID, accept.Epoch)
 	if old != nil {
 		_ = old.ws.Close()
 	}
