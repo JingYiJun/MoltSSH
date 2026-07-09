@@ -5,8 +5,16 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 IMAGE=${MOLTSSH_DOCKER_SMOKE_IMAGE:-moltssh-sshd-smoke:local}
 NAME=moltssh-sshd-smoke-$$
 TMP=$(mktemp -d)
+SERVER_PID=
+RELAY_PIDS=()
 
 cleanup() {
+  if [ -n "$SERVER_PID" ]; then
+    kill "$SERVER_PID" >/dev/null 2>&1 || true
+  fi
+  for pid in "${RELAY_PIDS[@]}"; do
+    kill "$pid" >/dev/null 2>&1 || true
+  done
   docker rm -f "$NAME" >/dev/null 2>&1 || true
   docker rmi "$IMAGE" >/dev/null 2>&1 || true
   rm -rf "$TMP"
@@ -26,6 +34,117 @@ PY
 go build -o "$TMP/moltssh" "$ROOT/cmd/moltssh"
 ssh-keygen -q -t ed25519 -N "" -C moltssh-docker-smoke -f "$TMP/id_ed25519"
 PUB=$(cat "$TMP/id_ed25519.pub")
+
+cat >"$TMP/tcp-relay.py" <<'PY'
+#!/usr/bin/env python3
+import argparse
+import socket
+import threading
+import time
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--listen-host", default="127.0.0.1")
+parser.add_argument("--listen-port", type=int, required=True)
+parser.add_argument("--upstream-host", default="127.0.0.1")
+parser.add_argument("--upstream-port", type=int, required=True)
+parser.add_argument("--delay-ms", type=float, default=0)
+parser.add_argument("--fail-after", type=float, default=0)
+args = parser.parse_args()
+
+delay = args.delay_ms / 1000
+stop = threading.Event()
+lock = threading.Lock()
+sockets = set()
+
+
+def remember(sock):
+    with lock:
+        sockets.add(sock)
+
+
+def forget(sock):
+    with lock:
+        sockets.discard(sock)
+
+
+def close_sock(sock):
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+    try:
+        sock.close()
+    except OSError:
+        pass
+    forget(sock)
+
+
+def close_all():
+    with lock:
+        current = list(sockets)
+    for sock in current:
+        close_sock(sock)
+
+
+def forward(src, dst):
+    try:
+        while not stop.is_set():
+            data = src.recv(65536)
+            if not data:
+                break
+            if delay:
+                time.sleep(delay)
+            dst.sendall(data)
+    except OSError:
+        pass
+    finally:
+        close_sock(src)
+        close_sock(dst)
+
+
+def handle(client):
+    upstream = None
+    try:
+        upstream = socket.create_connection((args.upstream_host, args.upstream_port), timeout=5)
+        remember(client)
+        remember(upstream)
+        threads = [
+            threading.Thread(target=forward, args=(client, upstream), daemon=True),
+            threading.Thread(target=forward, args=(upstream, client), daemon=True),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    except OSError:
+        close_sock(client)
+        if upstream is not None:
+            close_sock(upstream)
+
+
+listener = socket.socket()
+listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+listener.bind((args.listen_host, args.listen_port))
+listener.listen()
+
+
+def fail_later():
+    time.sleep(args.fail_after)
+    stop.set()
+    close_sock(listener)
+    close_all()
+
+
+if args.fail_after > 0:
+    threading.Thread(target=fail_later, daemon=True).start()
+
+while not stop.is_set():
+    try:
+        client, _ = listener.accept()
+    except OSError:
+        break
+    threading.Thread(target=handle, args=(client,), daemon=True).start()
+PY
 
 docker build --build-arg PUBKEY="$PUB" -t "$IMAGE" -f - "$ROOT" <<'DOCKERFILE'
 FROM nginx:alpine
@@ -64,9 +183,11 @@ for i in $(seq 1 30); do
 done
 
 MOLTSSH_PORT=$(free_port)
+FAST_PORT=$(free_port)
+SLOW_PORT=$(free_port)
 cat >"$TMP/moltssh.toml" <<EOF
 schema_version = 1
-name = "docker-ssh"
+name = "docker-ssh-multipath"
 
 [server]
 listen = "127.0.0.1:${MOLTSSH_PORT}"
@@ -79,27 +200,50 @@ buffer_bytes = 1048576
 
 [probe]
 interval = "100ms"
-timeout = "1s"
+timeout = "2s"
 switch_cooldown = "200ms"
-active_failure_threshold = 2
+active_failure_threshold = 1
 candidate_success_threshold = 1
-better_rtt_min_delta = "1ms"
-better_rtt_ratio = 0.25
+better_rtt_min_delta = "20ms"
+better_rtt_ratio = 0.20
 
 [[paths]]
-name = "docker-local"
+name = "fast-lan"
 transport = "ws"
-endpoint = "ws://127.0.0.1:${MOLTSSH_PORT}/moltssh"
+endpoint = "ws://127.0.0.1:${FAST_PORT}/moltssh"
 priority = 100
+enabled = true
+
+[[paths]]
+name = "slow-relay"
+transport = "ws"
+endpoint = "ws://127.0.0.1:${SLOW_PORT}/moltssh"
+priority = 50
 enabled = true
 EOF
 
 "$TMP/moltssh" server --config "$TMP/moltssh.toml" >"$TMP/moltssh-server.log" 2>&1 &
 SERVER_PID=$!
-trap 'kill "$SERVER_PID" >/dev/null 2>&1 || true; cleanup' EXIT
+
+python3 "$TMP/tcp-relay.py" \
+  --listen-port "$FAST_PORT" \
+  --upstream-port "$MOLTSSH_PORT" \
+  --delay-ms 10 \
+  --fail-after 2.0 \
+  >"$TMP/fast-relay.log" 2>&1 &
+RELAY_PIDS+=("$!")
+
+python3 "$TMP/tcp-relay.py" \
+  --listen-port "$SLOW_PORT" \
+  --upstream-port "$MOLTSSH_PORT" \
+  --delay-ms 120 \
+  >"$TMP/slow-relay.log" 2>&1 &
+RELAY_PIDS+=("$!")
 
 for i in $(seq 1 40); do
-  if "$TMP/moltssh" probe --config "$TMP/moltssh.toml" >"$TMP/moltssh-probe.log" 2>&1; then
+  if "$TMP/moltssh" probe --config "$TMP/moltssh.toml" >"$TMP/moltssh-probe.log" 2>&1 \
+    && grep -q "path=fast-lan status=ok" "$TMP/moltssh-probe.log" \
+    && grep -q "path=slow-relay status=ok" "$TMP/moltssh-probe.log"; then
     break
   fi
   if [ "$i" = 40 ]; then
@@ -111,18 +255,53 @@ for i in $(seq 1 40); do
   sleep 0.25
 done
 
+set +e
 OUT=$(ssh -i "$TMP/id_ed25519" \
   -o IdentitiesOnly=yes \
   -o BatchMode=yes \
   -o StrictHostKeyChecking=no \
   -o UserKnownHostsFile="$TMP/known_hosts" \
   -o ProxyCommand="$TMP/moltssh proxy --config $TMP/moltssh.toml" \
-  test@ignored 'printf docker-ssh-ok')
+  test@ignored 'i=1; while [ "$i" -le 50 ]; do printf "tick-%02d\n" "$i"; i=$((i+1)); sleep 0.12; done' \
+  2>"$TMP/ssh.err")
+SSH_STATUS=$?
+set -e
 
-if [ "$OUT" != "docker-ssh-ok" ]; then
-  echo "unexpected ssh output: $OUT" >&2
+if [ "$SSH_STATUS" -ne 0 ]; then
+  cat "$TMP/moltssh-probe.log" >&2 || true
+  cat "$TMP/moltssh-server.log" >&2 || true
+  cat "$TMP/fast-relay.log" >&2 || true
+  cat "$TMP/slow-relay.log" >&2 || true
+  cat "$TMP/ssh.err" >&2 || true
+  echo "ssh command failed with status $SSH_STATUS" >&2
+  exit "$SSH_STATUS"
+fi
+
+EXPECTED=$(python3 - <<'PY'
+print("\n".join(f"tick-{i:02d}" for i in range(1, 51)))
+PY
+)
+
+if [ "$OUT" != "$EXPECTED" ]; then
+  echo "unexpected ssh output:" >&2
+  printf '%s\n' "$OUT" >&2
+  echo "expected:" >&2
+  printf '%s\n' "$EXPECTED" >&2
+  exit 1
+fi
+
+if ! grep -q "proxy active path=fast-lan" "$TMP/ssh.err"; then
+  cat "$TMP/ssh.err" >&2
+  echo "fast-lan path was not activated" >&2
+  exit 1
+fi
+
+if ! grep -q "proxy active path=slow-relay" "$TMP/ssh.err"; then
+  cat "$TMP/ssh.err" >&2
+  echo "slow-relay path was not activated after fast-lan failed" >&2
   exit 1
 fi
 
 cat "$TMP/moltssh-probe.log"
-printf '%s\n' "$OUT"
+grep "proxy active path=" "$TMP/ssh.err"
+printf '%s\n' "docker-ssh-multipath-ok"
