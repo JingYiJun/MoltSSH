@@ -1,0 +1,56 @@
+name: Bug Report
+description: Report a reproducible MoltSSH bug.
+title: "fix: "
+labels:
+  - bug
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What broke?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduce
+      description: Exact commands, config shape, and network setup needed to reproduce.
+      placeholder: |
+        1. Start moltssh server ...
+        2. Run moltssh proxy ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version or Commit
+      placeholder: v0.1.0 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Go version when building from source, ssh client/server versions, relay or proxy involved.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Redact credentials, private keys, hostnames, tokens, relay URLs with secrets, and SSH payload.
+      render: text

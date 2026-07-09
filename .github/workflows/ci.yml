@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v*"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Unit tests
+        run: go test ./...
+
+      - name: Race tests
+        run: go test -race ./...
+
+      - name: Docker SSH smoke test
+        run: scripts/docker-ssh-smoke.sh
+
+  release:
+    name: Release
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build release archives
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            tag="$REF_NAME"
+            version="$REF_NAME"
+            prerelease=false
+          else
+            short_sha="${SHA::12}"
+            tag="build-${short_sha}"
+            version="$tag"
+            prerelease=true
+            if ! git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+              git tag "$tag" "$SHA"
+              git push origin "refs/tags/$tag"
+            fi
+          fi
+
+          mkdir -p dist
+          date_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          targets=(
+            linux/amd64
+            linux/arm64
+            darwin/amd64
+            darwin/arm64
+            windows/amd64
+          )
+
+          for target in "${targets[@]}"; do
+            goos=${target%/*}
+            goarch=${target#*/}
+            name="moltssh_${version}_${goos}_${goarch}"
+            bin="dist/$name/moltssh"
+            if [ "$goos" = "windows" ]; then
+              bin="$bin.exe"
+            fi
+
+            mkdir -p "dist/$name"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build \
+              -trimpath \
+              -ldflags="-s -w" \
+              -o "$bin" \
+              ./cmd/moltssh
+
+            if [ "$goos" = "windows" ]; then
+              (cd dist && zip -qr "$name.zip" "$name")
+            else
+              tar -C dist -czf "dist/$name.tar.gz" "$name"
+            fi
+            rm -rf "dist/$name"
+          done
+
+          (cd dist && sha256sum *.tar.gz *.zip > SHA256SUMS)
+
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "prerelease=$prerelease"
+            echo "date_utc=$date_utc"
+          } >>"$GITHUB_ENV"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          notes="Automated MoltSSH build for ${GITHUB_SHA}."
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+          else
+            args=(--title "$tag" --notes "$notes")
+            if [ "$prerelease" = "true" ]; then
+              args+=(--prerelease --latest=false)
+            fi
+            gh release create "$tag" dist/* "${args[@]}"
+          fi

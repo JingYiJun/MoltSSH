@@ -1,0 +1,44 @@
+name: Feature Request
+description: Propose a focused MoltSSH change.
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user or operational problem does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: The smallest behavior change that would solve the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Existing tools, config, or deployment changes that were considered.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI/config
+        - WebSocket protocol
+        - Resume/buffering
+        - Path probing/switching
+        - SSH compatibility
+        - Release/packaging
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks
+      description: Protocol, security, compatibility, or operational risks.

@@ -72,6 +72,10 @@ go test -race ./...
 scripts/docker-ssh-smoke.sh
 ```
 
+GitHub Actions runs the same checks on pushes and pull requests. Pushes to
+`main` publish prerelease builds named `build-<commit>`. Tags matching `v*`
+publish normal GitHub releases.
+
 If your environment cannot write to the default Go build cache, use a writable
 cache path:
 
