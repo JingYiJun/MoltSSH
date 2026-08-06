@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -32,12 +32,13 @@ const (
 )
 
 type Config struct {
-	SchemaVersion int
-	Name          string
-	Server        ServerConfig
-	Resume        ResumeConfig
-	Probe         ProbeConfig
-	Paths         []PathConfig
+	SchemaVersion  int
+	Name           string
+	Server         ServerConfig
+	Resume         ResumeConfig
+	Probe          ProbeConfig
+	Paths          []PathConfig
+	sourceIdentity string
 }
 
 type ServerConfig struct {
@@ -69,14 +70,6 @@ type PathConfig struct {
 	Enabled   bool
 }
 
-type rawConfig struct {
-	top    map[string]any
-	server map[string]any
-	resume map[string]any
-	probe  map[string]any
-	paths  []map[string]any
-}
-
 func LoadConfigFile(path, command string) (*Config, error) {
 	if path == "" {
 		return nil, fmt.Errorf("--config is required")
@@ -85,7 +78,26 @@ func LoadConfigFile(path, command string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return ParseConfig(string(data), command)
+	cfg, err := ParseConfig(string(data), command)
+	if err != nil {
+		return nil, err
+	}
+	if command == CommandProxy {
+		cfg.sourceIdentity = canonicalConfigIdentity(path)
+	}
+	return cfg, nil
+}
+
+func canonicalConfigIdentity(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return ""
+	}
+	abs = filepath.Clean(abs)
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return filepath.Clean(resolved)
+	}
+	return abs
 }
 
 func ParseConfig(data, command string) (*Config, error) {
@@ -217,235 +229,4 @@ func enabledPaths(paths []PathConfig) []PathConfig {
 		}
 	}
 	return enabled
-}
-
-func parseTOML(data string) (*rawConfig, error) {
-	raw := &rawConfig{
-		top:    map[string]any{},
-		server: map[string]any{},
-		resume: map[string]any{},
-		probe:  map[string]any{},
-	}
-	current := raw.top
-	section := "top"
-	for i, line := range strings.Split(data, "\n") {
-		line = strings.TrimSpace(stripComment(line))
-		if line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]]") {
-			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "[["), "]]"))
-			if name != "paths" {
-				return nil, fmt.Errorf("line %d: unknown table array %q", i+1, name)
-			}
-			raw.paths = append(raw.paths, map[string]any{})
-			current = raw.paths[len(raw.paths)-1]
-			section = "paths"
-			continue
-		}
-		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
-			name := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(line, "["), "]"))
-			switch name {
-			case "server":
-				current = raw.server
-			case "resume":
-				current = raw.resume
-			case "probe":
-				current = raw.probe
-			default:
-				return nil, fmt.Errorf("line %d: unknown section %q", i+1, name)
-			}
-			section = name
-			continue
-		}
-		key, val, ok := strings.Cut(line, "=")
-		if !ok {
-			return nil, fmt.Errorf("line %d: expected key = value", i+1)
-		}
-		key = strings.TrimSpace(key)
-		if !allowedKey(section, key) {
-			return nil, fmt.Errorf("line %d: unknown key %s.%s", i+1, section, key)
-		}
-		if _, exists := current[key]; exists {
-			return nil, fmt.Errorf("line %d: duplicate key %s.%s", i+1, section, key)
-		}
-		parsed, err := parseValue(strings.TrimSpace(val))
-		if err != nil {
-			return nil, fmt.Errorf("line %d: %w", i+1, err)
-		}
-		current[key] = parsed
-	}
-	return raw, nil
-}
-
-func stripComment(line string) string {
-	inString := false
-	escaped := false
-	for i, r := range line {
-		if escaped {
-			escaped = false
-			continue
-		}
-		if r == '\\' && inString {
-			escaped = true
-			continue
-		}
-		if r == '"' {
-			inString = !inString
-			continue
-		}
-		if r == '#' && !inString {
-			return line[:i]
-		}
-	}
-	return line
-}
-
-func allowedKey(section, key string) bool {
-	keys := map[string]map[string]bool{
-		"top": {
-			"schema_version": true, "name": true,
-		},
-		"server": {
-			"listen": true, "http_path": true, "connect": true,
-		},
-		"resume": {
-			"timeout": true, "buffer_bytes": true,
-		},
-		"probe": {
-			"interval": true, "timeout": true, "switch_cooldown": true,
-			"active_failure_threshold": true, "candidate_success_threshold": true,
-			"better_rtt_min_delta": true, "better_rtt_ratio": true,
-		},
-		"paths": {
-			"name": true, "transport": true, "endpoint": true, "priority": true, "enabled": true,
-		},
-	}
-	return keys[section][key]
-}
-
-func parseValue(s string) (any, error) {
-	if strings.HasPrefix(s, "\"") {
-		v, err := strconv.Unquote(s)
-		if err != nil {
-			return nil, err
-		}
-		return v, nil
-	}
-	switch s {
-	case "true":
-		return true, nil
-	case "false":
-		return false, nil
-	}
-	if strings.Contains(s, ".") {
-		v, err := strconv.ParseFloat(s, 64)
-		if err != nil {
-			return nil, fmt.Errorf("bad float %q", s)
-		}
-		return v, nil
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil {
-		return nil, fmt.Errorf("bad value %q", s)
-	}
-	return v, nil
-}
-
-func requiredString(m map[string]any, key string) (string, error) {
-	v, ok := m[key]
-	if !ok {
-		return "", fmt.Errorf("missing %s", key)
-	}
-	s, ok := v.(string)
-	if !ok {
-		return "", fmt.Errorf("%s must be a string", key)
-	}
-	return s, nil
-}
-
-func optionalString(m map[string]any, key, def string) (string, error) {
-	if _, ok := m[key]; !ok {
-		return def, nil
-	}
-	return requiredString(m, key)
-}
-
-func requiredDuration(m map[string]any, key string) (time.Duration, error) {
-	s, err := requiredString(m, key)
-	if err != nil {
-		return 0, err
-	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return 0, fmt.Errorf("%s must be a Go duration", key)
-	}
-	return d, nil
-}
-
-func optionalDuration(m map[string]any, key string, def time.Duration) (time.Duration, error) {
-	if _, ok := m[key]; !ok {
-		return def, nil
-	}
-	return requiredDuration(m, key)
-}
-
-func requiredInt(m map[string]any, key string) (int, error) {
-	v, ok := m[key]
-	if !ok {
-		return 0, fmt.Errorf("missing %s", key)
-	}
-	n, ok := v.(int)
-	if !ok {
-		return 0, fmt.Errorf("%s must be an integer", key)
-	}
-	return n, nil
-}
-
-func optionalInt(m map[string]any, key string, def int) (int, error) {
-	if _, ok := m[key]; !ok {
-		return def, nil
-	}
-	return requiredInt(m, key)
-}
-
-func requiredFloat(m map[string]any, key string) (float64, error) {
-	v, ok := m[key]
-	if !ok {
-		return 0, fmt.Errorf("missing %s", key)
-	}
-	switch n := v.(type) {
-	case int:
-		return float64(n), nil
-	case float64:
-		return n, nil
-	default:
-		return 0, fmt.Errorf("%s must be a number", key)
-	}
-}
-
-func optionalFloat(m map[string]any, key string, def float64) (float64, error) {
-	if _, ok := m[key]; !ok {
-		return def, nil
-	}
-	return requiredFloat(m, key)
-}
-
-func requiredBool(m map[string]any, key string) (bool, error) {
-	v, ok := m[key]
-	if !ok {
-		return false, fmt.Errorf("missing %s", key)
-	}
-	b, ok := v.(bool)
-	if !ok {
-		return false, fmt.Errorf("%s must be a boolean", key)
-	}
-	return b, nil
-}
-
-func optionalBool(m map[string]any, key string, def bool) (bool, error) {
-	if _, ok := m[key]; !ok {
-		return def, nil
-	}
-	return requiredBool(m, key)
 }

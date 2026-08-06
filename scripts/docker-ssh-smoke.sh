@@ -5,6 +5,7 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 IMAGE=${MOLTSSH_DOCKER_SMOKE_IMAGE:-moltssh-sshd-smoke:local}
 NAME=moltssh-sshd-smoke-$$
 TMP=$(mktemp -d)
+export XDG_CACHE_HOME="$TMP/cache"
 SERVER_PID=
 RELAY_PIDS=()
 
@@ -166,16 +167,17 @@ docker run -d --rm --name "$NAME" -p 127.0.0.1::2222 "$IMAGE" >/dev/null
 SSH_PORT=$(docker port "$NAME" 2222/tcp | sed 's/.*://')
 
 for i in $(seq 1 30); do
-  if ssh -p "$SSH_PORT" -i "$TMP/id_ed25519" \
+  if ssh -F /dev/null -p "$SSH_PORT" -i "$TMP/id_ed25519" \
     -o IdentitiesOnly=yes \
     -o BatchMode=yes \
     -o StrictHostKeyChecking=no \
     -o UserKnownHostsFile="$TMP/known_hosts" \
-    test@127.0.0.1 true >/dev/null 2>&1; then
+    test@127.0.0.1 true >/dev/null 2>"$TMP/ssh-ready.err"; then
     break
   fi
   if [ "$i" = 30 ]; then
     docker logs "$NAME" >&2 || true
+    cat "$TMP/ssh-ready.err" >&2 || true
     echo "sshd did not become ready" >&2
     exit 1
   fi
@@ -256,7 +258,7 @@ for i in $(seq 1 40); do
 done
 
 set +e
-OUT=$(ssh -i "$TMP/id_ed25519" \
+OUT=$(ssh -F /dev/null -i "$TMP/id_ed25519" \
   -o IdentitiesOnly=yes \
   -o BatchMode=yes \
   -o StrictHostKeyChecking=no \
@@ -302,6 +304,55 @@ if ! grep -q "proxy active path=slow-relay" "$TMP/ssh.err"; then
   exit 1
 fi
 
+for key in dns tcp tls websocket_upgrade probe_rtt total failed_phase; do
+  if ! grep -q "${key}=" "$TMP/moltssh-probe.log"; then
+    cat "$TMP/moltssh-probe.log" >&2
+    echo "probe output is missing ${key}" >&2
+    exit 1
+  fi
+done
+
+if ! grep -Eq 'event=proxy_dial .*dns=.*tcp=.*tls=.*websocket_upgrade=.*moltssh_hello=.*probe_rtt=.*total=' "$TMP/ssh.err"; then
+  cat "$TMP/ssh.err" >&2
+  echo "proxy dial phase timing record was not emitted" >&2
+  exit 1
+fi
+
+python3 - "$XDG_CACHE_HOME" <<'PY'
+import json
+import pathlib
+import sys
+
+files = list((pathlib.Path(sys.argv[1]) / "moltssh" / "path-state").glob("*.json"))
+if len(files) != 1:
+    raise SystemExit(f"expected one path-state file, found {len(files)}")
+record = json.loads(files[0].read_text())
+if record != {"version": 1, "path": "slow-relay"}:
+    raise SystemExit(f"unexpected path-state record: {record!r}")
+PY
+
+WARM_OUT=$(ssh -F /dev/null -i "$TMP/id_ed25519" \
+  -o IdentitiesOnly=yes \
+  -o BatchMode=yes \
+  -o StrictHostKeyChecking=no \
+  -o UserKnownHostsFile="$TMP/known_hosts" \
+  -o ProxyCommand="$TMP/moltssh proxy --config $TMP/moltssh.toml" \
+  test@ignored 'printf warm-lkg-ok' \
+  2>"$TMP/warm-ssh.err")
+
+if [ "$WARM_OUT" != "warm-lkg-ok" ]; then
+  cat "$TMP/warm-ssh.err" >&2 || true
+  echo "warm LKG SSH command returned unexpected output: $WARM_OUT" >&2
+  exit 1
+fi
+
+if ! grep -Eq 'event=proxy_dial path=slow-relay status=ok .*probe_rtt=0s' "$TMP/warm-ssh.err"; then
+  cat "$TMP/warm-ssh.err" >&2 || true
+  echo "warm startup did not direct-dial the saved slow-relay path" >&2
+  exit 1
+fi
+
 cat "$TMP/moltssh-probe.log"
-grep "proxy active path=" "$TMP/ssh.err"
+grep -E "proxy active path=|event=proxy_dial" "$TMP/ssh.err"
+grep -E "proxy active path=|event=proxy_dial" "$TMP/warm-ssh.err"
 printf '%s\n' "docker-ssh-multipath-ok"
