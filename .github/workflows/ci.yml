@@ -25,6 +25,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Check Go pure LOC
+        run: scripts/check-go-pure-loc.sh
+
       - name: Unit tests
         run: go test ./...
 
