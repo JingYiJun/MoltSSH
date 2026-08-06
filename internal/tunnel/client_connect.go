@@ -15,11 +15,7 @@ var (
 func (rt *clientRuntime) connectAny(ctx context.Context, resume bool) error {
 	lkg := rt.lastKnownGoodPath()
 	if lkg == nil {
-		candidates, err := probeBatch(ctx, rt.cfg.Paths, rt.cfg.Probe.Timeout)
-		if err != nil {
-			return err
-		}
-		return rt.activateRankedCandidates(ctx, candidates, resume)
+		return rt.activateFirstAvailable(ctx, resume)
 	}
 
 	probePaths := pathsExcept(rt.cfg.Paths, lkg.Name)

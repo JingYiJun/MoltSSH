@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"sort"
+	"sync"
 	"time"
 
 	"golang.org/x/net/websocket"
@@ -131,10 +132,24 @@ func probeContextError(ctx context.Context, err error) error {
 }
 
 func probeBatch(ctx context.Context, paths []PathConfig, timeout time.Duration) ([]probeCandidate, error) {
-	enabled := enabledPaths(paths)
-	if len(enabled) == 0 {
+	results, count := streamProbeCandidates(ctx, paths, timeout)
+	if count == 0 {
 		return nil, ctx.Err()
 	}
+	candidates := make([]probeCandidate, 0, count)
+	for candidate := range results {
+		candidates = append(candidates, candidate)
+	}
+	rankProbeCandidates(candidates)
+	if err := ctx.Err(); err != nil {
+		_ = closeProbeCandidates(candidates)
+		return candidates, err
+	}
+	return candidates, nil
+}
+
+func streamProbeCandidates(ctx context.Context, paths []PathConfig, timeout time.Duration) (<-chan probeCandidate, int) {
+	enabled := enabledPaths(paths)
 	type job struct {
 		path  PathConfig
 		order int
@@ -145,8 +160,11 @@ func probeBatch(ctx context.Context, paths []PathConfig, timeout time.Duration) 
 		jobs <- job{path: path, order: order}
 	}
 	close(jobs)
+	var workers sync.WaitGroup
 	for range min(len(enabled), maxConcurrentProbes) {
+		workers.Add(1)
 		go func() {
+			defer workers.Done()
 			for job := range jobs {
 				results <- probePathCandidate(ctx, probeRequest{
 					Path: job.path, Timeout: timeout, Open: openWebSocket, order: job.order,
@@ -154,16 +172,11 @@ func probeBatch(ctx context.Context, paths []PathConfig, timeout time.Duration) 
 			}
 		}()
 	}
-	candidates := make([]probeCandidate, 0, len(enabled))
-	for range enabled {
-		candidates = append(candidates, <-results)
-	}
-	rankProbeCandidates(candidates)
-	if err := ctx.Err(); err != nil {
-		_ = closeProbeCandidates(candidates)
-		return candidates, err
-	}
-	return candidates, nil
+	go func() {
+		workers.Wait()
+		close(results)
+	}()
+	return results, len(enabled)
 }
 
 func rankProbeCandidates(candidates []probeCandidate) {
