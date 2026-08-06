@@ -45,6 +45,8 @@ relay 重启和 path 变化，并继续复用仍在运行的 MoltSSH server 进�
 - 内存态 resume state，包含 session ID、epoch、ACK、FIN、offset 和 replay buffer。
 - 由 probe 驱动的 path selection，包含 RTT、failure threshold、success threshold
   和 switch cooldown 设置。
+- 并行分阶段拨号、probe connection 复用、建议性的 last-known-good path
+  首拨、session 内 heartbeat 和带 jitter 的重连退避。
 - GitHub Actions CI、release binaries、issue templates 和 Docker SSH smoke 覆盖。
 
 协议计划见 [docs/mvp.md](docs/mvp.md)，transport 决策见
@@ -177,6 +179,30 @@ enabled = true
   终止 TLS 的路径。
 - 将 MoltSSH server 放在 public relay path 的受保护访问层之后。
 - 将私钥、凭证、证书、token 和主机细节保存在本地部署文件中。
+
+Path 性能与运行状态：
+
+- 冷启动会并行 probe 所有 enabled paths，最多同时执行 8 个 probe。成功
+  probe 的 WebSocket 会直接发送 `hello` 晋级为正式 session，不再重拨所选 path。
+- Session 被 `accept` 后，`proxy` 只把已接受的 path name 写入建议性的
+  last-known-good cache。设置 `XDG_CACHE_HOME` 时，路径为
+  `$XDG_CACHE_HOME/moltssh/path-state/<config-hash>.json`；否则位于操作系统的
+  user cache directory。hash 来自 config 文件 canonical path。
+- 热启动会立即拨号已保存 path，同时在后台 probe 其他 paths。cache 缺失、
+  过期、指向 disabled path、格式损坏或不可写时，都不会阻断 fallback。安全地
+  删除该 cache 即可重置提示。
+- Cache directory 使用 `0700`，文件使用 `0600`；JSON 只包含 `version` 和
+  `path`。Session、epoch、offset、payload bytes、endpoint 和凭证仍然只存在于
+  内存，不会写入 cache。
+- Active session 在现有 WebSocket 内使用 application `ping`/`pong` heartbeat；
+  只有 inactive paths 才新建 probe connection。Inactive probe 晋级时会复用
+  同一个 WebSocket 发送 resume `hello`。
+- 重连采用 capped exponential backoff + full jitter：base 为 `200ms`、cap 为
+  `5s`，并把 delay 截断到剩余 `resume.timeout` 预算内。
+- 每次正式尝试只输出一条 `event=proxy_dial`，包含 `dns`、`tcp`、`tls`、
+  `websocket_upgrade`、`moltssh_hello`、`probe_rtt` 和 `total`。日志不包含
+  endpoint 或 secret query values。这些优化不改变 `moltssh.v1` wire protocol，
+  也不新增 TOML 字段。
 
 <p align="right">(<a href="#readme-top">返回顶部</a>)</p>
 

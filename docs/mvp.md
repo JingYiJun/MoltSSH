@@ -90,7 +90,7 @@ Field behavior:
 | `probe.interval` | proxy/probe | `"3s"` | Time between health probes for enabled inactive paths. |
 | `probe.timeout` | proxy/probe | `"2s"` | Per-probe deadline. A path that misses this deadline counts as one failed probe. |
 | `probe.switch_cooldown` | proxy | `"10s"` | Minimum time between latency-driven path switches. Failure-driven switches use the latest probe result immediately. |
-| `probe.active_failure_threshold` | proxy | `2` | Consecutive failed probes on the active path before failover starts. |
+| `probe.active_failure_threshold` | proxy | `2` | Consecutive failed in-session heartbeats on the active path before failover starts. |
 | `probe.candidate_success_threshold` | proxy | `3` | Consecutive successful probes required before an inactive path may become active. |
 | `probe.better_rtt_min_delta` | proxy | `"30ms"` | Candidate must be at least this many milliseconds faster than the active path before a latency-driven switch. |
 | `probe.better_rtt_ratio` | proxy | `0.25` | Candidate must also be at least this fraction faster than the active path. `0.25` means 25% faster. |
@@ -114,7 +114,12 @@ Command-specific validation:
 
 There is no `session_dir` in the MVP. Live sessions, offsets, epochs, and
 unacknowledged byte buffers are process-memory state only. MoltSSH does not
-persist SSH payload bytes or live connection metadata to disk.
+persist SSH payload bytes or live connection metadata to disk. The only
+persisted client hint is an advisory last-known-good path-name cache under the
+user cache directory. It is keyed by a SHA-256 hash of the canonical config
+path and contains exactly `{"version":1,"path":"<name>"}`. Directory mode is
+`0700`, file mode is `0600`, and replacement is atomic. Cache read/write
+failure is non-fatal, and deleting the cache is safe.
 
 ## Transport plan
 
@@ -299,7 +304,10 @@ Resume rules:
   with `error`.
 
 `ping` and `pong` are path-level frames. They may be sent before `hello`, do
-not require `session_id` or `epoch`, and must not change session state.
+not require `session_id` or `epoch`, and must not change session state. The
+active path sends heartbeat `ping` on the existing session WebSocket. The
+normal session receive loop remains the sole reader and dispatches the matching
+`pong`; heartbeat code must never add a competing WebSocket reader.
 
 Close codes:
 
@@ -328,9 +336,25 @@ The active path changes only when doing so is clearly useful:
 
 This avoids flapping between relays for small RTT differences.
 
-To switch paths, `proxy` opens a new WebSocket on the candidate path, sends a
-resume `hello` with its current receive offsets, waits for `accept` with a
-higher `epoch`, marks the candidate path active, then closes the old WebSocket.
+On cold startup, `proxy` probes enabled paths concurrently with at most eight
+workers. Results are ranked by success, RTT, priority, and declaration order.
+The selected successful probe WebSocket is promoted on the same connection:
+`proxy` sends `hello` after the matching `pong`, rather than doing a second
+DNS/TCP/TLS/WebSocket dial.
+
+After an accepted activation, `proxy` saves only that path name as the
+last-known-good hint. On warm startup it direct-dials that path first while
+probing the alternatives in the background. Success returns without waiting
+for background probes; those probes are cancelled, drained, and closed. A
+failed, stale, disabled, malformed, or unavailable hint falls back to the
+ranked concurrent candidates. Probe-only success never updates the hint.
+
+For steady-state selection, the active path is measured by in-session
+heartbeat, so periodic checks add no DNS lookup, TCP connection, TLS handshake,
+or WebSocket upgrade for the active path. Only inactive paths are probed. To
+switch, `proxy` promotes the current successful inactive probe by sending a
+resume `hello` with current receive offsets on that same WebSocket, waits for
+`accept` with a higher `epoch`, marks it active, then closes the old WebSocket.
 
 During reconnect or path switch, `proxy` keeps OpenSSH stdin/stdout open and
 blocks reads or writes as needed. It exits non-zero only after
@@ -339,13 +363,13 @@ blocks reads or writes as needed. It exits non-zero only after
 `moltssh probe --config ...` prints one line per enabled path:
 
 ```text
-path=<name> status=<ok|fail> rtt=<duration> endpoint=<url> error=<message>
+path=<name> status=<ok|fail> dns=<duration> tcp=<duration> tls=<duration> websocket_upgrade=<duration> probe_rtt=<duration> total=<duration> failed_phase=<phase> endpoint=<url> error=<message>
 ```
 
-`rtt` uses Go `time.Duration.String()`. It is empty when `status=fail`.
-`error` is empty when `status=ok`. The `error=` field is always printed, even
-when empty. Endpoint output must redact credentials and secret query
-parameters.
+All duration fields use Go `time.Duration.String()`. Output remains in TOML
+declaration order even though probes run concurrently. `failed_phase` and
+`error` are empty on success. Every field is always printed. Endpoint and
+error output must redact credentials and secret query parameters.
 
 Probe uses `ping`/`pong` only. It must not create a session and must not dial
 `server.connect`.
@@ -379,5 +403,12 @@ Probe uses `ping`/`pong` only. It must not create a session and must not dial
 ### M3: Operations
 
 - Reject stale epochs, unknown sessions, and bad offsets.
-- Logs include path, session, epoch, close reason, and RTT, but never private
-  keys, credentials, relay URLs with embedded secrets, or SSH payload bytes.
+- A failed resume attempt uses capped exponential backoff with full jitter:
+  immediate first attempt, `200ms` base, `5s` cap, clipped to the remaining
+  `resume.timeout` budget. A successful resume resets the attempt counter.
+- Each formal dial attempt emits exactly one `event=proxy_dial` record with
+  `path`, `status`, `failed_phase`, `dns`, `tcp`, `tls`,
+  `websocket_upgrade`, `moltssh_hello`, `probe_rtt`, `total`, and `error`.
+- Logs include path, session, epoch, close reason, and RTT where applicable,
+  but never private keys, credentials, relay URLs with embedded secrets, or
+  SSH payload bytes.

@@ -48,6 +48,8 @@ Current capabilities:
   replay buffers.
 - Probe driven path selection with RTT, failure threshold, success threshold,
   and switch cooldown settings.
+- Parallel phased dialing, reusable probe connections, advisory last-known-good
+  path startup, in-session heartbeat, and jittered reconnect backoff.
 - GitHub Actions CI, release binaries, issue templates, and Docker SSH smoke
   coverage.
 
@@ -185,6 +187,32 @@ Deployment guidance:
   paths.
 - Keep private keys, credentials, certificates, tokens, and machine-specific
   host details in local deployment files.
+
+Path performance and runtime state:
+
+- On a cold start, enabled paths are probed concurrently, with at most eight
+  probes in flight. A successful probe WebSocket is promoted directly by
+  sending `hello`; MoltSSH does not redial the selected path.
+- After an accepted session, `proxy` stores only the accepted path name in an
+  advisory last-known-good cache. The cache is
+  `$XDG_CACHE_HOME/moltssh/path-state/<config-hash>.json` when
+  `XDG_CACHE_HOME` is set, otherwise it is under the operating system user
+  cache directory. The hash identifies the canonical config-file path.
+- A warm start dials the saved path immediately while probing alternatives in
+  the background. Missing, stale, disabled, malformed, or unwritable cache
+  state never prevents connection fallback. Removing this cache is safe.
+- Cache directories use mode `0700`, files use `0600`, and the JSON contains
+  only `version` and `path`. Sessions, epochs, offsets, payload bytes,
+  endpoints, and credentials remain memory-only and are never cached.
+- The active session uses application `ping`/`pong` heartbeat on its existing
+  WebSocket. Only inactive paths get new probe connections. A promoted
+  inactive probe keeps the same WebSocket for the resume `hello`.
+- Reconnect uses capped exponential backoff with full jitter: a `200ms` base,
+  a `5s` cap, and delays clipped to the remaining `resume.timeout` budget.
+- Formal attempts emit one `event=proxy_dial` record with `dns`, `tcp`, `tls`,
+  `websocket_upgrade`, `moltssh_hello`, `probe_rtt`, and `total`. Endpoints and
+  secret query values are not logged. These optimizations do not change the
+  `moltssh.v1` wire protocol or add TOML fields.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
