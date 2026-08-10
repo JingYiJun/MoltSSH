@@ -96,6 +96,8 @@ go install github.com/jingyijun/moltssh/cmd/moltssh@latest
 
 设置 `GOBIN` 时，二进制会安装到 `GOBIN`；否则会安装到
 `$(go env GOPATH)/bin`。请确保对应目录已加入 `PATH`。
+`@latest` 始终跟随最新的语义化版本 tag，因此可能晚于
+[Unreleased](CHANGELOG.md#unreleased) 中记录的新功能。
 
 从源码构建：
 
@@ -105,11 +107,17 @@ cd MoltSSH
 go build -o moltssh ./cmd/moltssh
 ```
 
-验证安装并查看构建来源：
+验证任意安装：
+
+```bash
+moltssh --help
+```
+
+从源码构建的版本，以及已经包含 version 命令的 tag 版本，可以使用以下
+命令查看构建来源：
 
 ```bash
 moltssh version
-moltssh --help
 ```
 
 运行本地检查：

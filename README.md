@@ -102,6 +102,8 @@ go install github.com/jingyijun/moltssh/cmd/moltssh@latest
 
 The binary is installed into `GOBIN` when it is set, otherwise into
 `$(go env GOPATH)/bin`. Make sure that directory is on `PATH`.
+`@latest` follows the newest semantic-version tag, which can lag behind
+features listed under [Unreleased](CHANGELOG.md#unreleased).
 
 Build from source:
 
@@ -111,11 +113,17 @@ cd MoltSSH
 go build -o moltssh ./cmd/moltssh
 ```
 
-Verify the installation and inspect build provenance:
+Verify any installation:
+
+```bash
+moltssh --help
+```
+
+For source builds and tagged releases that include the version command,
+inspect build provenance with:
 
 ```bash
 moltssh version
-moltssh --help
 ```
 
 Run local checks:
