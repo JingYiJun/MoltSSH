@@ -75,7 +75,7 @@ func probeUsage(w io.Writer) {
 	fmt.Fprintln(w, "  moltssh probe --config FILE")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Probe every enabled WebSocket path and print phase timings.")
-	fmt.Fprintln(w, "Use failed_phase to identify DNS, TCP, TLS, WebSocket, or protocol failures.")
+	fmt.Fprintln(w, "Use failed_phase to identify DNS, TCP, TLS, WebSocket upgrade, or MoltSSH ping/pong failures.")
 }
 
 func versionUsage(w io.Writer) {

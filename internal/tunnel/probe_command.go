@@ -12,6 +12,8 @@ import (
 	"strings"
 )
 
+var errProbePathFailed = errors.New("one or more probe paths failed")
+
 func Probe(ctx context.Context, cfg *Config, stdout io.Writer) (err error) {
 	candidates, batchErr := probeBatch(ctx, cfg.Paths, cfg.Probe.Timeout)
 	sort.SliceStable(candidates, func(i, j int) bool {
@@ -21,15 +23,19 @@ func Probe(ctx context.Context, cfg *Config, stdout io.Writer) (err error) {
 		err = errors.Join(err, closeProbeCandidates(candidates))
 	}()
 
+	var probeErr error
 	writeErrors := make([]error, 0)
 	for _, candidate := range candidates {
+		if candidate.Err != nil {
+			probeErr = errProbePathFailed
+		}
 		record := formatProbeRecord(candidate)
 		log.Printf("probe %s", record)
 		if _, writeErr := fmt.Fprintln(stdout, record); writeErr != nil {
 			writeErrors = append(writeErrors, fmt.Errorf("write probe result for path %q: %w", candidate.Path.Name, writeErr))
 		}
 	}
-	return errors.Join(batchErr, errors.Join(writeErrors...))
+	return errors.Join(batchErr, probeErr, errors.Join(writeErrors...))
 }
 
 func formatProbeRecord(candidate probeCandidate) string {

@@ -123,7 +123,7 @@ func runProbe(args []string, stdout io.Writer) error {
 		return fmt.Errorf("load probe config %q: %w\nhint: verify each paths[].endpoint and retry", *configPath, err)
 	}
 	if err := tunnel.Probe(context.Background(), cfg, stdout); err != nil {
-		return fmt.Errorf("probe failed: %w\nhint: inspect failed_phase to distinguish DNS, TCP, TLS, WebSocket, and MoltSSH handshake failures", err)
+		return fmt.Errorf("probe failed: %w\nhint: inspect failed_phase to distinguish DNS, TCP, TLS, WebSocket upgrade, and MoltSSH ping/pong failures", err)
 	}
 	return nil
 }

@@ -181,16 +181,20 @@ Start with the probe command whenever a proxy path cannot connect:
 moltssh probe --config ~/.config/moltssh/example.toml
 ```
 
-The `failed_phase` field narrows the failure to `dns`, `tcp`, `tls`,
-`websocket_upgrade`, or the MoltSSH handshake. Common checks:
+For `moltssh probe`, the `failed_phase` field narrows the failure to `dns`,
+`tcp`, `tls`, `websocket_upgrade`, or `probe`. Common checks:
 
 - `dns`: verify the endpoint hostname and resolver.
 - `tcp`: verify the port, relay process, firewall, and route.
 - `tls`: verify the certificate name, trust chain, and reverse-proxy TLS setup.
 - `websocket_upgrade`: verify `server.http_path`, reverse-proxy WebSocket
   forwarding, and the `moltssh.v1` subprotocol.
-- MoltSSH handshake or `unknown session`: verify that client and server versions
-  are compatible and that the MoltSSH server process did not restart.
+- `probe`: the WebSocket connected, but the MoltSSH ping/pong check failed;
+  verify client/server compatibility and reverse-proxy frame forwarding.
+
+Proxy-session logs can instead report `failed_phase=moltssh_hello` or
+`unknown session`. Verify client/server compatibility and confirm that the
+MoltSSH server process did not restart.
 
 Run `moltssh help COMMAND` for required flags and command-specific guidance.
 Errors include a next diagnostic action where one is available.

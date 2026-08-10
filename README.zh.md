@@ -175,16 +175,20 @@ Proxy path 无法连接时，首先运行 probe：
 moltssh probe --config ~/.config/moltssh/example.toml
 ```
 
-`failed_phase` 会把故障定位到 `dns`、`tcp`、`tls`、
-`websocket_upgrade` 或 MoltSSH handshake。常见检查项：
+对于 `moltssh probe`，`failed_phase` 会把故障定位到 `dns`、`tcp`、
+`tls`、`websocket_upgrade` 或 `probe`。常见检查项：
 
 - `dns`：检查 endpoint hostname 和 resolver。
 - `tcp`：检查端口、relay 进程、防火墙和路由。
 - `tls`：检查证书名称、信任链和 reverse proxy TLS 配置。
 - `websocket_upgrade`：检查 `server.http_path`、reverse proxy 的
   WebSocket forwarding 和 `moltssh.v1` subprotocol。
-- MoltSSH handshake 或 `unknown session`：检查 client/server 版本兼容性，
-  并确认 MoltSSH server 进程没有重启。
+- `probe`：WebSocket 已连接，但 MoltSSH ping/pong 检查失败；检查
+  client/server 兼容性和 reverse proxy 的 frame forwarding。
+
+Proxy session 日志可能改为报告 `failed_phase=moltssh_hello` 或
+`unknown session`。此时应检查 client/server 兼容性，并确认 MoltSSH
+server 进程没有重启。
 
 运行 `moltssh help COMMAND` 可查看必需参数和子命令排障建议。能够给出
 下一步诊断动作的错误会直接附带 hint。
