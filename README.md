@@ -15,8 +15,11 @@ reachability; MoltSSH provides session resume, path probing, and path
 switching.
 
 [View Releases](https://github.com/JingYiJun/MoltSSH/releases) ·
+[Changelog](CHANGELOG.md) ·
 [Report Bug](https://github.com/JingYiJun/MoltSSH/issues/new?template=bug_report.yml) ·
 [Request Feature](https://github.com/JingYiJun/MoltSSH/issues/new?template=feature_request.yml)
+
+![MoltSSH architecture: OpenSSH uses MoltSSH as ProxyCommand, the client resumes across WebSocket paths, and the server keeps a stable TCP connection to sshd.](docs/assets/moltssh-architecture.png)
 
 ## Table of Contents
 
@@ -24,12 +27,14 @@ switching.
 2. [Built With](#built-with)
 3. [Getting Started](#getting-started)
 4. [Usage](#usage)
-5. [Configuration](#configuration)
-6. [Roadmap](#roadmap)
-7. [Contributing](#contributing)
-8. [License](#license)
-9. [Contact](#contact)
-10. [Acknowledgments](#acknowledgments)
+5. [Troubleshooting](#troubleshooting)
+6. [Configuration](#configuration)
+7. [Roadmap](#roadmap)
+8. [Contributing](#contributing)
+9. [Security](#security)
+10. [License](#license)
+11. [Contact](#contact)
+12. [Acknowledgments](#acknowledgments)
 
 ## About The Project
 
@@ -89,12 +94,28 @@ moltssh_<version>_windows_amd64.exe
 SHA256SUMS
 ```
 
+Install the latest tagged version with Go:
+
+```bash
+go install github.com/jingyijun/moltssh/cmd/moltssh@latest
+```
+
+The binary is installed into `GOBIN` when it is set, otherwise into
+`$(go env GOPATH)/bin`. Make sure that directory is on `PATH`.
+
 Build from source:
 
 ```bash
 git clone https://github.com/JingYiJun/MoltSSH.git
 cd MoltSSH
 go build -o moltssh ./cmd/moltssh
+```
+
+Verify the installation and inspect build provenance:
+
+```bash
+moltssh version
+moltssh --help
 ```
 
 Run local checks:
@@ -141,6 +162,44 @@ Open an SSH session:
 ```bash
 ssh example-host
 ```
+
+Inspect command-specific help:
+
+```bash
+moltssh help proxy
+moltssh help server
+moltssh help probe
+```
+
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Troubleshooting
+
+Start with the probe command whenever a proxy path cannot connect:
+
+```bash
+moltssh probe --config ~/.config/moltssh/example.toml
+```
+
+The `failed_phase` field narrows the failure to `dns`, `tcp`, `tls`,
+`websocket_upgrade`, or the MoltSSH handshake. Common checks:
+
+- `dns`: verify the endpoint hostname and resolver.
+- `tcp`: verify the port, relay process, firewall, and route.
+- `tls`: verify the certificate name, trust chain, and reverse-proxy TLS setup.
+- `websocket_upgrade`: verify `server.http_path`, reverse-proxy WebSocket
+  forwarding, and the `moltssh.v1` subprotocol.
+- MoltSSH handshake or `unknown session`: verify that client and server versions
+  are compatible and that the MoltSSH server process did not restart.
+
+Run `moltssh help COMMAND` for required flags and command-specific guidance.
+Errors include a next diagnostic action where one is available.
+
+> [!WARNING]
+> MoltSSH has no application-layer authentication. Do not expose the raw
+> `moltssh server` WebSocket listener to the public internet. Bind it to
+> loopback or place it behind a protected private access layer or authenticated
+> reverse proxy. See [SECURITY.md](SECURITY.md).
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
@@ -236,14 +295,16 @@ work items.
 
 ## Contributing
 
-Contributions are welcome through focused issues and pull requests.
+Contributions are welcome through focused issues and pull requests. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) for the development workflow and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) before participating.
 
-1. Fork the project.
-2. Create a feature branch such as `feature/ws-probe-output`.
-3. Commit with Conventional Commits, for example
-   `feat: improve probe output`.
-4. Run `go test ./...`.
-5. Open a pull request with scope, testing, and protocol/security notes.
+<p align="right">(<a href="#readme-top">back to top</a>)</p>
+
+## Security
+
+Read [SECURITY.md](SECURITY.md) before deploying MoltSSH or reporting a
+vulnerability. Security-sensitive reports should not be filed as public issues.
 
 <p align="right">(<a href="#readme-top">back to top</a>)</p>
 
