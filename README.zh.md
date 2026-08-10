@@ -14,8 +14,11 @@ MoltSSH 是基于 WebSocket 的可恢复 OpenSSH `ProxyCommand`。
 提供 session resume、path probing 和 path switching。
 
 [查看 Releases](https://github.com/JingYiJun/MoltSSH/releases) ·
+[更新日志](CHANGELOG.md) ·
 [报告 Bug](https://github.com/JingYiJun/MoltSSH/issues/new?template=bug_report.yml) ·
 [请求 Feature](https://github.com/JingYiJun/MoltSSH/issues/new?template=feature_request.yml)
+
+![MoltSSH 架构：OpenSSH 使用 MoltSSH 作为 ProxyCommand，客户端在多条 WebSocket path 间恢复，服务端保持到 sshd 的稳定 TCP 连接。](docs/assets/moltssh-architecture.png)
 
 ## 目录
 
@@ -23,12 +26,14 @@ MoltSSH 是基于 WebSocket 的可恢复 OpenSSH `ProxyCommand`。
 2. [技术栈](#技术栈)
 3. [开始使用](#开始使用)
 4. [用法](#用法)
-5. [配置](#配置)
-6. [路线图](#路线图)
-7. [贡献](#贡献)
-8. [许可证](#许可证)
-9. [联系](#联系)
-10. [致谢](#致谢)
+5. [故障排查](#故障排查)
+6. [配置](#配置)
+7. [路线图](#路线图)
+8. [贡献](#贡献)
+9. [安全](#安全)
+10. [许可证](#许可证)
+11. [联系](#联系)
+12. [致谢](#致谢)
 
 ## 项目介绍
 
@@ -83,12 +88,36 @@ moltssh_<version>_windows_amd64.exe
 SHA256SUMS
 ```
 
+使用 Go 安装最新 tag 版本：
+
+```bash
+go install github.com/jingyijun/moltssh/cmd/moltssh@latest
+```
+
+设置 `GOBIN` 时，二进制会安装到 `GOBIN`；否则会安装到
+`$(go env GOPATH)/bin`。请确保对应目录已加入 `PATH`。
+`@latest` 始终跟随最新的语义化版本 tag，因此可能晚于
+[Unreleased](CHANGELOG.md#unreleased) 中记录的新功能。
+
 从源码构建：
 
 ```bash
 git clone https://github.com/JingYiJun/MoltSSH.git
 cd MoltSSH
 go build -o moltssh ./cmd/moltssh
+```
+
+验证任意安装：
+
+```bash
+moltssh --help
+```
+
+从源码构建的版本，以及已经包含 version 命令的 tag 版本，可以使用以下
+命令查看构建来源：
+
+```bash
+moltssh version
 ```
 
 运行本地检查：
@@ -135,6 +164,48 @@ Host example-host
 ```bash
 ssh example-host
 ```
+
+查看子命令帮助：
+
+```bash
+moltssh help proxy
+moltssh help server
+moltssh help probe
+```
+
+<p align="right">(<a href="#readme-top">返回顶部</a>)</p>
+
+## 故障排查
+
+Proxy path 无法连接时，首先运行 probe：
+
+```bash
+moltssh probe --config ~/.config/moltssh/example.toml
+```
+
+对于 `moltssh probe`，`failed_phase` 会把故障定位到 `dns`、`tcp`、
+`tls`、`websocket_upgrade` 或 `probe`。常见检查项：
+
+- `dns`：检查 endpoint hostname 和 resolver。
+- `tcp`：检查端口、relay 进程、防火墙和路由。
+- `tls`：检查证书名称、信任链和 reverse proxy TLS 配置。
+- `websocket_upgrade`：检查 `server.http_path`、reverse proxy 的
+  WebSocket forwarding 和 `moltssh.v1` subprotocol。
+- `probe`：WebSocket 已连接，但 MoltSSH ping/pong 检查失败；检查
+  client/server 兼容性和 reverse proxy 的 frame forwarding。
+
+Proxy session 日志可能改为报告 `failed_phase=moltssh_hello` 或
+`unknown session`。此时应检查 client/server 兼容性，并确认 MoltSSH
+server 进程没有重启。
+
+运行 `moltssh help COMMAND` 可查看必需参数和子命令排障建议。能够给出
+下一步诊断动作的错误会直接附带 hint。
+
+> [!WARNING]
+> MoltSSH 没有 application-layer authentication。不要把裸露的
+> `moltssh server` WebSocket listener 暴露到公网。应绑定 loopback，或放在
+> 受保护的 private access layer / 已认证 reverse proxy 后。详见
+> [SECURITY.md](SECURITY.md)。
 
 <p align="right">(<a href="#readme-top">返回顶部</a>)</p>
 
@@ -225,13 +296,16 @@ Path 性能与运行状态：
 
 ## 贡献
 
-欢迎通过聚焦的 issue 和 pull request 参与贡献。
+欢迎通过聚焦的 issue 和 pull request 参与贡献。参与前请阅读
+[CONTRIBUTING.md](CONTRIBUTING.md) 中的开发流程和
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
 
-1. Fork 项目。
-2. 创建 feature branch，例如 `feature/ws-probe-output`。
-3. 使用 Conventional Commits 提交，例如 `feat: improve probe output`。
-4. 运行 `go test ./...`。
-5. 创建 pull request，并写清 scope、testing、protocol/security notes。
+<p align="right">(<a href="#readme-top">返回顶部</a>)</p>
+
+## 安全
+
+部署 MoltSSH 或报告漏洞前请阅读 [SECURITY.md](SECURITY.md)。涉及安全的报告
+不应提交为公开 issue。
 
 <p align="right">(<a href="#readme-top">返回顶部</a>)</p>
 

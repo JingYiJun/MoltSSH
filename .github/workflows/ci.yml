@@ -98,7 +98,7 @@ jobs:
 
             GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build \
               -trimpath \
-              -ldflags="-s -w" \
+              -ldflags="-s -w -X github.com/jingyijun/moltssh/internal/buildinfo.version=${version} -X github.com/jingyijun/moltssh/internal/buildinfo.commit=${SHA}" \
               -o "$bin" \
               ./cmd/moltssh
           done
@@ -114,14 +114,29 @@ jobs:
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           set -euo pipefail
 
-          notes="Automated MoltSSH build for ${GITHUB_SHA}."
+          notes_file="docs/releases/${tag}.md"
+          notes_args=()
+          if [ "$REF_TYPE" = "tag" ]; then
+            if [ -f "$notes_file" ]; then
+              notes_args+=(--notes-file "$notes_file")
+            else
+              notes_args+=(--generate-notes)
+            fi
+          else
+            notes_args+=(--notes "Automated MoltSSH build for ${GITHUB_SHA}.")
+          fi
+
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist/* --clobber
+            if [ "$REF_TYPE" = "tag" ] && [ -f "$notes_file" ]; then
+              gh release edit "$tag" --notes-file "$notes_file"
+            fi
           else
-            args=(--title "$tag" --notes "$notes")
+            args=(--title "$tag" "${notes_args[@]}")
             if [ "$prerelease" = "true" ]; then
               args+=(--prerelease --latest=false)
             fi

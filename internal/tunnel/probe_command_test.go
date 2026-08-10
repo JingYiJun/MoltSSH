@@ -127,10 +127,10 @@ func TestProbeCommand_RedactsFailureEndpointAndError(t *testing.T) {
 	// When
 	err := Probe(context.Background(), cfg, &stdout)
 	// Then
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected failed path to make the probe command fail")
 	}
-	combined := stdout.String() + logs.String()
+	combined := stdout.String() + logs.String() + err.Error()
 	if !strings.HasPrefix(stdout.String(), "path=relay status=fail") {
 		t.Fatalf("output = %q, want failure prefix", stdout.String())
 	}
