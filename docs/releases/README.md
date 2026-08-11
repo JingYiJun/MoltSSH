@@ -39,8 +39,8 @@ Pull requests without a matching category label appear under `Other Changes`.
 
 ## Preview
 
-After the release tag exists, preview GitHub's generated section without
-creating or editing a release:
+After merging the release pull request and before creating the tag, preview
+GitHub's generated section without creating or editing a release:
 
 ```bash
 gh api \
@@ -50,3 +50,7 @@ gh api \
   -f target_commitish=<release-commit> \
   --jq .body
 ```
+
+Once the tag exists, GitHub ignores `target_commitish`; the pre-tag preview is
+the last opportunity to correct labels before the workflow publishes the
+release.
