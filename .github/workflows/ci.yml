@@ -123,19 +123,34 @@ jobs:
           notes_file="docs/releases/${tag}.md"
           notes_args=()
           if [ "$REF_TYPE" = "tag" ]; then
+            generated_notes="$RUNNER_TEMP/moltssh-generated-release-notes.md"
+            combined_notes="$RUNNER_TEMP/moltssh-release-notes.md"
+            gh api \
+              --method POST \
+              "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$tag" \
+              -f target_commitish="$GITHUB_SHA" \
+              --jq .body >"$generated_notes"
+            test -s "$generated_notes"
+
             if [ -f "$notes_file" ]; then
-              notes_args+=(--notes-file "$notes_file")
+              {
+                cat "$notes_file"
+                printf '\n\n'
+                cat "$generated_notes"
+              } >"$combined_notes"
             else
-              notes_args+=(--generate-notes)
+              cp "$generated_notes" "$combined_notes"
             fi
+            notes_args+=(--notes-file "$combined_notes")
           else
             notes_args+=(--notes "Automated MoltSSH build for ${GITHUB_SHA}.")
           fi
 
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist/* --clobber
-            if [ "$REF_TYPE" = "tag" ] && [ -f "$notes_file" ]; then
-              gh release edit "$tag" --notes-file "$notes_file"
+            if [ "$REF_TYPE" = "tag" ]; then
+              gh release edit "$tag" --notes-file "$combined_notes"
             fi
           else
             args=(--title "$tag" "${notes_args[@]}")

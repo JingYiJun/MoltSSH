@@ -8,6 +8,21 @@ while the public API and wire protocol remain in the `0.x` development series.
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-08-11
+
+### Added
+
+- Maintainer guidance for curated release preambles and pull request labels that
+  drive GitHub-generated release-note categories.
+
+### Changed
+
+- Tagged releases now combine an optional checked-in preamble with
+  GitHub-generated pull request categories, contributor credits, and the full
+  changelog link.
+- Rerunning a tagged release refreshes the generated notes before updating the
+  existing GitHub Release.
+
 ## [0.4.0] - 2026-08-11
 
 ### Added
@@ -73,7 +88,8 @@ while the public API and wire protocol remain in the `0.x` development series.
 - Initial WebSocket MVP with OpenSSH `ProxyCommand`, session resume, path
   probing, path switching, CI, and cross-platform release binaries.
 
-[Unreleased]: https://github.com/JingYiJun/MoltSSH/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/JingYiJun/MoltSSH/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/JingYiJun/MoltSSH/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/JingYiJun/MoltSSH/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/JingYiJun/MoltSSH/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/JingYiJun/MoltSSH/compare/v0.2.0...v0.3.0
