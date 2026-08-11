@@ -63,8 +63,23 @@ Every pull request should include:
 - Protocol, security, compatibility, and operational risks.
 - Documentation updates for user-facing changes.
 
+Apply the release-note label that best describes the change before merge:
+
+- `enhancement` for new user-visible behavior.
+- `bug` for fixes.
+- `documentation` for documentation-only changes.
+- `breaking-change` for incompatible behavior or configuration changes.
+- `skip-changelog` when the pull request should not appear in generated notes.
+
+Release labels drive the categories in `.github/release.yml`. Unmatched pull
+requests appear under `Other Changes`.
+
 Keep `cmd/moltssh` as a thin entrypoint, CLI behavior in `internal/cli`, and
 transport/session behavior in `internal/tunnel`. Prefer the Go standard library
 and add the smallest meaningful test for non-trivial behavior.
+
+Maintainers preparing a release should follow
+[docs/releases/README.md](docs/releases/README.md) for the optional curated
+preamble and generated changelog workflow.
 
 By participating, you agree to follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
