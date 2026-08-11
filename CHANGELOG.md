@@ -8,6 +8,8 @@ while the public API and wire protocol remain in the `0.x` development series.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-11
+
 ### Added
 
 - A generated architecture diagram for the English and Chinese READMEs.
@@ -26,6 +28,13 @@ while the public API and wire protocol remain in the `0.x` development series.
 - Release binaries now embed the release version and full source commit.
 - Tagged releases use checked-in release notes when available and otherwise use
   GitHub-generated notes.
+- GitHub Actions now use the Node 24-based `actions/checkout@v7` and
+  `actions/setup-go@v7` while preserving `go.sum` cache invalidation.
+
+### Fixed
+
+- Failed path probes now return a non-zero command status without leaking
+  endpoint query values into the summarized error.
 
 ## [0.3.1] - 2026-08-06
 
@@ -64,7 +73,8 @@ while the public API and wire protocol remain in the `0.x` development series.
 - Initial WebSocket MVP with OpenSSH `ProxyCommand`, session resume, path
   probing, path switching, CI, and cross-platform release binaries.
 
-[Unreleased]: https://github.com/JingYiJun/MoltSSH/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/JingYiJun/MoltSSH/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/JingYiJun/MoltSSH/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/JingYiJun/MoltSSH/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/JingYiJun/MoltSSH/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/JingYiJun/MoltSSH/compare/v0.1.1...v0.2.0
